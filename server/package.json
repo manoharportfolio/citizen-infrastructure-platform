@@ -1,0 +1,17 @@
+{
+  "name": "citizen-infrastructure-server",
+  "version": "1.0.0",
+  "description": "Backend for Citizen Infrastructure Intelligence Platform",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "axios": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.0.0"
+  }
+}
