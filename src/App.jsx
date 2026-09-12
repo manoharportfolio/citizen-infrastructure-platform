@@ -14,6 +14,8 @@ import GovernmentRegister from "./pages/GovernmentRegister";
 import GovernmentLogin from "./pages/GovernmentLogin";
 import GovernmentDashboard from "./pages/GovernmentDashboard";
 
+import ReportNow from "./pages/ReportNow.jsx";
+
 function App() {
   return (
     <div className="app-wrapper">
@@ -43,6 +45,11 @@ function App() {
             element={<CitizenDashboard />}
           />
 
+            <Route
+            path="/citizen/report-now"
+            element={<ReportNow />}
+          />
+
           <Route
             path="/government/register"
             element={<GovernmentRegister />}
@@ -57,6 +64,9 @@ function App() {
             path="/government/dashboard"
             element={<GovernmentDashboard />}
           />
+          
+        
+
         </Routes>
       </main>
 
