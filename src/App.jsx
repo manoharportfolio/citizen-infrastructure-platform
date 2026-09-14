@@ -9,6 +9,7 @@ import RoleSelection from "./pages/RoleSelection";
 import CitizenRegister from "./pages/CitizenRegister";
 import CitizenLogin from "./pages/CitizenLogin";
 import CitizenDashboard from "./pages/CitizenDashboard";
+import ReportSomething from "./pages/ReportSomething.jsx";
 
 import GovernmentRegister from "./pages/GovernmentRegister";
 import GovernmentLogin from "./pages/GovernmentLogin";
@@ -45,9 +46,14 @@ function App() {
             element={<CitizenDashboard />}
           />
 
-            <Route
+          <Route
             path="/citizen/report-now"
             element={<ReportNow />}
+          />
+
+          <Route
+            path="/citizen/report-something"
+            element={<ReportSomething />}
           />
 
           <Route
@@ -64,8 +70,8 @@ function App() {
             path="/government/dashboard"
             element={<GovernmentDashboard />}
           />
-          
-        
+
+
 
         </Routes>
       </main>

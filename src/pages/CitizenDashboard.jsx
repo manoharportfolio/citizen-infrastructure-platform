@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-
 import { auth, db } from "../firebase/config";
 
 function CitizenDashboard() {
@@ -10,214 +9,391 @@ function CitizenDashboard() {
 
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+
+  // ==========================================
+  // GET LOGGED-IN USER
+  // ==========================================
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        navigate("/citizen/login");
-        return;
-      }
-
-      try {
-        const userRef = doc(db, "users", user.uid);
-        const userSnapshot = await getDoc(userRef);
-
-        if (userSnapshot.exists()) {
-          setUserData(userSnapshot.data());
-        } else {
-          setError("User profile not found.");
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (user) => {
+        if (!user) {
+          navigate("/citizen/login");
+          return;
         }
-      } catch (err) {
-        console.error(err);
-        setError("Failed to load your profile.");
-      } finally {
-        setLoading(false);
+
+        try {
+          const userRef = doc(
+            db,
+            "users",
+            user.uid
+          );
+
+          const userSnapshot =
+            await getDoc(userRef);
+
+          if (userSnapshot.exists()) {
+            setUserData(
+              userSnapshot.data()
+            );
+          } else {
+            // Fallback if profile document
+            // doesn't exist
+            setUserData({
+              fullName:
+                user.displayName ||
+                "Citizen",
+              email: user.email || "",
+            });
+          }
+        } catch (error) {
+          console.error(
+            "Error loading user profile:",
+            error
+          );
+
+          setUserData({
+            fullName:
+              user.displayName ||
+              "Citizen",
+            email: user.email || "",
+          });
+        } finally {
+          setLoading(false);
+        }
       }
-    });
+    );
 
     return () => unsubscribe();
   }, [navigate]);
 
+  // ==========================================
+  // LOGOUT
+  // ==========================================
+
   async function handleLogout() {
-    await signOut(auth);
-    navigate("/citizen/login");
+    try {
+      await signOut(auth);
+      navigate("/citizen/login");
+    } catch (error) {
+      console.error(
+        "Logout error:",
+        error
+      );
+    }
   }
+
+  // ==========================================
+  // LOADING
+  // ==========================================
 
   if (loading) {
     return (
       <div className="container py-5 text-center">
-        <div className="spinner-border" role="status"></div>
-        <p className="mt-3">Loading your profile...</p>
+
+        <div
+          className="spinner-border"
+          role="status"
+        >
+          <span className="visually-hidden">
+            Loading...
+          </span>
+        </div>
+
+        <p className="text-muted mt-3">
+          Loading your dashboard...
+        </p>
+
       </div>
     );
   }
 
-  if (error) {
-    return (
-      <div className="container py-5">
-        <div className="alert alert-danger">
-          {error}
-        </div>
-      </div>
-    );
-  }
+  // ==========================================
+  // DASHBOARD
+  // ==========================================
 
   return (
     <div className="container py-5">
 
-      {/* Header */}
+      {/* =====================================
+          HEADER
+      ====================================== */}
+
       <div className="d-flex justify-content-between align-items-center mb-4">
+
         <div>
           <h2 className="fw-bold mb-1">
-            Welcome, {userData?.fullName}
+            Citizen Dashboard
           </h2>
 
           <p className="text-muted mb-0">
-            Citizen Dashboard
+            Welcome back,{" "}
+            <strong>
+              {userData?.fullName ||
+                "Citizen"}
+            </strong>
           </p>
         </div>
 
         <button
+          type="button"
           className="btn btn-outline-danger"
           onClick={handleLogout}
         >
           Logout
         </button>
+
       </div>
 
-      {/* Profile */}
-      <div className="card shadow-sm mb-4">
-        <div className="card-body p-4">
+      {/* =====================================
+          WELCOME MESSAGE
+      ====================================== */}
 
-          <h4 className="fw-bold mb-4">
-            My Profile
-          </h4>
+      <div className="alert alert-info mb-4">
 
-          <div className="row g-4">
+        <strong>
+          Help improve your community.
+        </strong>
 
-            {/* Name */}
-            <div className="col-md-6">
-              <label className="text-muted small">
-                Full Name
-              </label>
+        <br />
 
-              <div className="fw-semibold">
-                {userData?.fullName || "Not available"}
-              </div>
-            </div>
+        Report infrastructure problems so
+        they can be analyzed, prioritized,
+        and addressed.
 
-            {/* DOB */}
-            <div className="col-md-6">
-              <label className="text-muted small">
-                Date of Birth
-              </label>
-
-              <div className="fw-semibold">
-                {userData?.dob || "Not available"}
-              </div>
-            </div>
-
-            {/* Email */}
-            <div className="col-md-6">
-              <label className="text-muted small">
-                Email Address
-              </label>
-
-              <div className="fw-semibold">
-                {userData?.email || "Not available"}
-              </div>
-
-              {userData?.emailVerified && (
-                <span className="badge text-bg-success mt-2">
-                  Email Verified
-                </span>
-              )}
-            </div>
-
-            {/* Phone */}
-            <div className="col-md-6">
-              <label className="text-muted small">
-                Phone Number
-              </label>
-
-              <div className="fw-semibold">
-                {userData?.phoneNumber || "Not available"}
-              </div>
-
-              {userData?.phoneVerified && (
-                <span className="badge text-bg-success mt-2">
-                  Phone Verified
-                </span>
-              )}
-            </div>
-
-            {/* Role */}
-            <div className="col-md-6">
-              <label className="text-muted small">
-                Account Type
-              </label>
-
-              <div className="fw-semibold text-capitalize">
-                {userData?.role || "Citizen"}
-              </div>
-            </div>
-
-            {/* Status */}
-            <div className="col-md-6">
-              <label className="text-muted small">
-                Account Status
-              </label>
-
-              <div>
-                <span className="badge text-bg-success text-capitalize">
-                  {userData?.accountStatus || "Active"}
-                </span>
-              </div>
-            </div>
-
-          </div>
-
-        </div>
       </div>
 
-      {/* Actions */}
+      {/* =====================================
+          REPORTING OPTIONS
+      ====================================== */}
+
       <div className="row g-4">
 
+        {/* =================================
+            REPORT NOW
+        ================================== */}
+
         <div className="col-md-6">
+
           <div className="card h-100 shadow-sm">
+
             <div className="card-body p-4">
-              <h5 className="fw-bold">
-                Report an Issue
-              </h5>
+
+              <div
+                className="mb-3"
+                style={{
+                  fontSize: "40px",
+                }}
+              >
+                📍
+              </div>
+
+              <h4 className="fw-bold">
+                Report Now
+              </h4>
 
               <p className="text-muted">
-                Report infrastructure problems in your area.
+                Report an infrastructure problem
+                that you are seeing right now.
               </p>
 
-              <button className="btn btn-dark">
-                Report Now
+              <ul className="text-muted ps-3">
+
+                <li>
+                  Current GPS location
+                </li>
+
+                <li>
+                  Fresh camera evidence
+                </li>
+
+                <li>
+                  Real-time observation
+                </li>
+
+              </ul>
+
+              <button
+                type="button"
+                className="btn btn-dark w-100 mt-3"
+                onClick={() =>
+                  navigate(
+                    "/citizen/report"
+                  )
+                }
+              >
+                📍 Report Now
               </button>
+
             </div>
+
           </div>
+
         </div>
 
+        {/* =================================
+            REPORT SOMETHING I SAW
+        ================================== */}
+
         <div className="col-md-6">
+
           <div className="card h-100 shadow-sm">
+
             <div className="card-body p-4">
-              <h5 className="fw-bold">
-                My Reports
-              </h5>
+
+              <div
+                className="mb-3"
+                style={{
+                  fontSize: "40px",
+                }}
+              >
+                📝
+              </div>
+
+              <h4 className="fw-bold">
+                Report Something I Saw
+              </h4>
 
               <p className="text-muted">
-                View and track the infrastructure issues you reported.
+                Report an infrastructure problem
+                that you noticed earlier.
               </p>
 
-              <button className="btn btn-outline-dark">
-                View Reports
+              <ul className="text-muted ps-3">
+
+                <li>
+                  Enter observation date
+                </li>
+
+                <li>
+                  Enter approximate location
+                </li>
+
+                <li>
+                  Describe what you saw
+                </li>
+
+              </ul>
+
+              <button
+                type="button"
+                className="btn btn-outline-dark w-100 mt-3"
+                onClick={() =>
+                  navigate(
+                    "/citizen/report-something"
+                  )
+                }
+              >
+                📝 Report Something I Saw
               </button>
+
             </div>
+
           </div>
+
+        </div>
+
+      </div>
+
+      {/* =====================================
+          MY REPORTS
+      ====================================== */}
+
+      <div className="card shadow-sm mt-4">
+
+        <div className="card-body p-4">
+
+          <h5 className="fw-bold">
+            My Reports
+          </h5>
+
+          <p className="text-muted mb-3">
+            Your submitted reports and their
+            current status will appear here.
+          </p>
+
+          {/* Day 6 will connect this section
+              to Firestore */}
+
+          <div className="alert alert-secondary mb-0">
+
+            You haven't submitted any reports
+            yet.
+
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* =====================================
+          PROFILE
+      ====================================== */}
+
+      <div className="card shadow-sm mt-4">
+
+        <div className="card-body p-4">
+
+          <h5 className="fw-bold mb-3">
+            My Profile
+          </h5>
+
+          <div className="row">
+
+            <div className="col-md-6 mb-3">
+
+              <small className="text-muted">
+                Name
+              </small>
+
+              <div className="fw-semibold">
+                {userData?.fullName ||
+                  "Not available"}
+              </div>
+
+            </div>
+
+            <div className="col-md-6 mb-3">
+
+              <small className="text-muted">
+                Email
+              </small>
+
+              <div className="fw-semibold">
+                {userData?.email ||
+                  "Not available"}
+              </div>
+
+            </div>
+
+            <div className="col-md-6 mb-3">
+
+              <small className="text-muted">
+                Phone
+              </small>
+
+              <div className="fw-semibold">
+                {userData?.phoneNumber ||
+                  "Not available"}
+              </div>
+
+            </div>
+
+            <div className="col-md-6 mb-3">
+
+              <small className="text-muted">
+                Account Type
+              </small>
+
+              <div className="fw-semibold">
+                Citizen
+              </div>
+
+            </div>
+
+          </div>
+
         </div>
 
       </div>
