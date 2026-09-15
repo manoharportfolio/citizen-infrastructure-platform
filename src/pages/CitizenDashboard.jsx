@@ -1,64 +1,64 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
+
 import { auth, db } from "../firebase/config";
 
 function CitizenDashboard() {
   const navigate = useNavigate();
 
-  const [userData, setUserData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
 
-  // ==========================================
-  // GET LOGGED-IN USER
-  // ==========================================
+  const [reports, setReports] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [reportsLoading, setReportsLoading] = useState(false);
+
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
       auth,
-      async (user) => {
-        if (!user) {
+      async (currentUser) => {
+        if (!currentUser) {
           navigate("/citizen/login");
           return;
         }
 
         try {
+          setUser(currentUser);
+
           const userRef = doc(
             db,
             "users",
-            user.uid
+            currentUser.uid
           );
 
-          const userSnapshot =
-            await getDoc(userRef);
+          const userSnapshot = await getDoc(userRef);
 
           if (userSnapshot.exists()) {
-            setUserData(
-              userSnapshot.data()
-            );
-          } else {
-            // Fallback if profile document
-            // doesn't exist
-            setUserData({
-              fullName:
-                user.displayName ||
-                "Citizen",
-              email: user.email || "",
-            });
+            setProfile(userSnapshot.data());
           }
-        } catch (error) {
+
+          await loadReports(currentUser.uid);
+        } catch (err) {
           console.error(
-            "Error loading user profile:",
-            error
+            "Dashboard loading error:",
+            err
           );
 
-          setUserData({
-            fullName:
-              user.displayName ||
-              "Citizen",
-            email: user.email || "",
-          });
+          setError(
+            "Unable to load your dashboard."
+          );
         } finally {
           setLoading(false);
         }
@@ -68,336 +68,318 @@ function CitizenDashboard() {
     return () => unsubscribe();
   }, [navigate]);
 
-  // ==========================================
-  // LOGOUT
-  // ==========================================
+  const loadReports = async (uid) => {
+    try {
+      setReportsLoading(true);
 
-  async function handleLogout() {
+      const reportsQuery = query(
+        collection(db, "reports"),
+        where("userId", "==", uid)
+      );
+
+      const snapshot = await getDocs(reportsQuery);
+
+      const reportList = snapshot.docs.map((reportDoc) => ({
+        id: reportDoc.id,
+        ...reportDoc.data(),
+      }));
+
+      /*
+       * Sort newest reports first.
+       * We sort in JavaScript so we don't need
+       * a Firestore composite index.
+       */
+      reportList.sort((a, b) => {
+        const timeA =
+          a.createdAt?.toMillis?.() || 0;
+
+        const timeB =
+          b.createdAt?.toMillis?.() || 0;
+
+        return timeB - timeA;
+      });
+
+      setReports(reportList);
+    } catch (err) {
+      console.error(
+        "Reports loading error:",
+        err
+      );
+
+      setError(
+        "Unable to load your reports."
+      );
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
     try {
       await signOut(auth);
       navigate("/citizen/login");
-    } catch (error) {
-      console.error(
-        "Logout error:",
-        error
-      );
+    } catch (err) {
+      console.error("Logout error:", err);
+      setError("Unable to logout.");
     }
-  }
+  };
 
-  // ==========================================
-  // LOADING
-  // ==========================================
+  const getStatusClass = (status) => {
+    switch (status) {
+      case "resolved":
+        return "bg-success";
+
+      case "work_started":
+        return "bg-primary";
+
+      case "under_verification":
+        return "bg-warning text-dark";
+
+      default:
+        return "bg-secondary";
+    }
+  };
 
   if (loading) {
     return (
       <div className="container py-5 text-center">
-
-        <div
-          className="spinner-border"
-          role="status"
-        >
-          <span className="visually-hidden">
-            Loading...
-          </span>
-        </div>
-
-        <p className="text-muted mt-3">
-          Loading your dashboard...
+        <div className="spinner-border" />
+        <p className="mt-3">
+          Loading dashboard...
         </p>
-
       </div>
     );
   }
 
-  // ==========================================
-  // DASHBOARD
-  // ==========================================
-
   return (
     <div className="container py-5">
-
-      {/* =====================================
-          HEADER
-      ====================================== */}
+      {error && (
+        <div className="alert alert-danger">
+          {error}
+        </div>
+      )}
 
       <div className="d-flex justify-content-between align-items-center mb-4">
-
         <div>
-          <h2 className="fw-bold mb-1">
-            Citizen Dashboard
-          </h2>
+          <h1>
+            Welcome,{" "}
+            {profile?.fullName ||
+              user?.displayName ||
+              "Citizen"}
+          </h1>
 
           <p className="text-muted mb-0">
-            Welcome back,{" "}
-            <strong>
-              {userData?.fullName ||
-                "Citizen"}
-            </strong>
+            Citizen Infrastructure Dashboard
           </p>
         </div>
 
         <button
-          type="button"
           className="btn btn-outline-danger"
           onClick={handleLogout}
         >
           Logout
         </button>
-
       </div>
 
-      {/* =====================================
-          WELCOME MESSAGE
-      ====================================== */}
-
-      <div className="alert alert-info mb-4">
-
-        <strong>
-          Help improve your community.
-        </strong>
-
-        <br />
-
-        Report infrastructure problems so
-        they can be analyzed, prioritized,
-        and addressed.
-
-      </div>
-
-      {/* =====================================
-          REPORTING OPTIONS
-      ====================================== */}
-
-      <div className="row g-4">
-
-        {/* =================================
-            REPORT NOW
-        ================================== */}
-
+      <div className="row g-3 mb-5">
         <div className="col-md-6">
-
-          <div className="card h-100 shadow-sm">
-
-            <div className="card-body p-4">
-
-              <div
-                className="mb-3"
-                style={{
-                  fontSize: "40px",
-                }}
-              >
-                📍
-              </div>
-
-              <h4 className="fw-bold">
-                Report Now
-              </h4>
+          <div className="card shadow-sm h-100">
+            <div className="card-body">
+              <h4>Report Now</h4>
 
               <p className="text-muted">
-                Report an infrastructure problem
-                that you are seeing right now.
+                Report an infrastructure issue happening
+                right now using your current location and
+                camera evidence.
               </p>
 
-              <ul className="text-muted ps-3">
-
-                <li>
-                  Current GPS location
-                </li>
-
-                <li>
-                  Fresh camera evidence
-                </li>
-
-                <li>
-                  Real-time observation
-                </li>
-
-              </ul>
-
               <button
-                type="button"
-                className="btn btn-dark w-100 mt-3"
+                className="btn btn-primary"
                 onClick={() =>
-                  navigate(
-                    "/citizen/report"
-                  )
+                  navigate("/citizen/report")
                 }
               >
-                📍 Report Now
+                Report Now
               </button>
-
             </div>
-
           </div>
-
         </div>
 
-        {/* =================================
-            REPORT SOMETHING I SAW
-        ================================== */}
-
         <div className="col-md-6">
-
-          <div className="card h-100 shadow-sm">
-
-            <div className="card-body p-4">
-
-              <div
-                className="mb-3"
-                style={{
-                  fontSize: "40px",
-                }}
-              >
-                📝
-              </div>
-
-              <h4 className="fw-bold">
-                Report Something I Saw
-              </h4>
+          <div className="card shadow-sm h-100">
+            <div className="card-body">
+              <h4>Report Something I Saw</h4>
 
               <p className="text-muted">
-                Report an infrastructure problem
-                that you noticed earlier.
+                Report an infrastructure problem you
+                noticed earlier.
               </p>
 
-              <ul className="text-muted ps-3">
-
-                <li>
-                  Enter observation date
-                </li>
-
-                <li>
-                  Enter approximate location
-                </li>
-
-                <li>
-                  Describe what you saw
-                </li>
-
-              </ul>
-
               <button
-                type="button"
-                className="btn btn-outline-dark w-100 mt-3"
+                className="btn btn-dark"
                 onClick={() =>
                   navigate(
                     "/citizen/report-something"
                   )
                 }
               >
-                📝 Report Something I Saw
+                Report Something I Saw
               </button>
-
             </div>
-
           </div>
-
         </div>
-
       </div>
 
-      {/* =====================================
-          MY REPORTS
-      ====================================== */}
+      <div className="card shadow-sm mb-4">
+        <div className="card-body">
+          <div className="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <h3 className="mb-1">
+                My Reports
+              </h3>
 
-      <div className="card shadow-sm mt-4">
+              <p className="text-muted mb-0">
+                Reports submitted from your account.
+              </p>
+            </div>
 
-        <div className="card-body p-4">
+            <span className="badge bg-dark">
+              {reports.length} Report
+              {reports.length !== 1 ? "s" : ""}
+            </span>
+          </div>
 
-          <h5 className="fw-bold">
-            My Reports
-          </h5>
+          {reportsLoading ? (
+            <div className="text-center py-4">
+              <div className="spinner-border" />
+            </div>
+          ) : reports.length === 0 ? (
+            <div className="alert alert-light border">
+              You haven't submitted any reports yet.
+            </div>
+          ) : (
+            <div className="row g-3">
+              {reports.map((report) => (
+                <div
+                  className="col-md-6"
+                  key={report.id}
+                >
+                  <div className="card border h-100">
+                    {report.evidence?.imageUrl && (
+                      <img
+                        src={report.evidence.imageUrl}
+                        alt="Report evidence"
+                        className="card-img-top"
+                        style={{
+                          height: "200px",
+                          objectFit: "cover",
+                        }}
+                      />
+                    )}
 
-          <p className="text-muted mb-3">
-            Your submitted reports and their
-            current status will appear here.
+                    <div className="card-body">
+                      <div className="d-flex justify-content-between align-items-start mb-2">
+                        <h5 className="card-title">
+                          {report.category}
+                        </h5>
+
+                        <span
+                          className={`badge ${getStatusClass(
+                            report.status
+                          )}`}
+                        >
+                          {report.status ||
+                            "reported"}
+                        </span>
+                      </div>
+
+                      <p className="card-text">
+                        {report.description}
+                      </p>
+
+                      <small className="text-muted">
+                        Type:{" "}
+                        {report.reportType ===
+                        "report-now"
+                          ? "Report Now"
+                          : "Report Something I Saw"}
+                      </small>
+
+                      {report.location && (
+                        <div className="mt-2">
+                          {report.location.latitude && (
+                            <small className="text-muted d-block">
+                              Latitude:{" "}
+                              {report.location.latitude}
+                            </small>
+                          )}
+
+                          {report.location.longitude && (
+                            <small className="text-muted d-block">
+                              Longitude:{" "}
+                              {report.location.longitude}
+                            </small>
+                          )}
+
+                          {report.location
+                            .approximateLocation && (
+                            <small className="text-muted d-block">
+                              Location:{" "}
+                              {
+                                report.location
+                                  .approximateLocation
+                              }
+                            </small>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="mt-3">
+                        <small className="text-muted">
+                          AI Check:{" "}
+                          {report.aiAnalysis
+                            ?.checked
+                            ? `${report.aiAnalysis.matchScore}%`
+                            : "Pending"}
+                        </small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="card shadow-sm">
+        <div className="card-body">
+          <h4>My Profile</h4>
+
+          <hr />
+
+          <p>
+            <strong>Name:</strong>{" "}
+            {profile?.fullName || "Not available"}
           </p>
 
-          {/* Day 6 will connect this section
-              to Firestore */}
+          <p>
+            <strong>Email:</strong>{" "}
+            {profile?.email || user?.email}
+          </p>
 
-          <div className="alert alert-secondary mb-0">
+          <p>
+            <strong>Phone:</strong>{" "}
+            {profile?.phoneNumber ||
+              "Not available"}
+          </p>
 
-            You haven't submitted any reports
-            yet.
-
-          </div>
-
+          <p className="mb-0">
+            <strong>Account Type:</strong>{" "}
+            Citizen
+          </p>
         </div>
-
       </div>
-
-      {/* =====================================
-          PROFILE
-      ====================================== */}
-
-      <div className="card shadow-sm mt-4">
-
-        <div className="card-body p-4">
-
-          <h5 className="fw-bold mb-3">
-            My Profile
-          </h5>
-
-          <div className="row">
-
-            <div className="col-md-6 mb-3">
-
-              <small className="text-muted">
-                Name
-              </small>
-
-              <div className="fw-semibold">
-                {userData?.fullName ||
-                  "Not available"}
-              </div>
-
-            </div>
-
-            <div className="col-md-6 mb-3">
-
-              <small className="text-muted">
-                Email
-              </small>
-
-              <div className="fw-semibold">
-                {userData?.email ||
-                  "Not available"}
-              </div>
-
-            </div>
-
-            <div className="col-md-6 mb-3">
-
-              <small className="text-muted">
-                Phone
-              </small>
-
-              <div className="fw-semibold">
-                {userData?.phoneNumber ||
-                  "Not available"}
-              </div>
-
-            </div>
-
-            <div className="col-md-6 mb-3">
-
-              <small className="text-muted">
-                Account Type
-              </small>
-
-              <div className="fw-semibold">
-                Citizen
-              </div>
-
-            </div>
-
-          </div>
-
-        </div>
-
-      </div>
-
     </div>
   );
 }

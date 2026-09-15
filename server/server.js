@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 
 import otpRoutes from "./routes/otpRoutes.js";
+import imageRoutes from "./routes/imageRoutes.js";
 
 dotenv.config();
 
@@ -20,11 +21,14 @@ app.use(express.json());
 
 app.get("/", (req, res) => {
   res.json({
-    message: "Citizen Infrastructure API is running.",
+    message:
+      "Citizen Infrastructure API is running.",
   });
 });
 
 app.use("/api/otp", otpRoutes);
+
+app.use("/api/images", imageRoutes);
 
 app.listen(PORT, () => {
   console.log(

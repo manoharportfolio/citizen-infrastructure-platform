@@ -1,418 +1,611 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  addDoc,
+  collection,
+  serverTimestamp,
+  updateDoc,
+  doc,
+} from "firebase/firestore";
+import { auth, db } from "../firebase/config";
+import { uploadImage } from "../services/imageService";
 
 function ReportSomething() {
   const navigate = useNavigate();
 
-  const [form, setForm] = useState({
-    date: "",
-    time: "",
-    location: "",
-    category: "",
-    description: "",
-  });
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+
+  const [location, setLocation] = useState("");
+
+  const [category, setCategory] = useState("");
+
+  const [description, setDescription] = useState("");
 
   const [evidence, setEvidence] = useState(null);
-  const [submitted, setSubmitted] = useState(false);
 
-  // ================================
-  // HANDLE INPUT
-  // ================================
+  const [loading, setLoading] = useState(false);
 
-  function handleChange(e) {
-    const { name, value } = e.target;
+  const [success, setSuccess] = useState(false);
 
-    setForm((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-  }
+  const [error, setError] = useState("");
 
-  // ================================
-  // HANDLE EVIDENCE
-  // ================================
+  // --------------------------------------------------
+  // FILE SELECTION
+  // --------------------------------------------------
 
-  function handleEvidenceChange(e) {
-    const file = e.target.files[0];
+  const handleEvidenceChange = (e) => {
+    const file = e.target.files?.[0];
 
     if (!file) {
       return;
     }
 
+    // Check file type
+    if (!file.type.startsWith("image/")) {
+      setError("Please select an image file.");
+      return;
+    }
+
+    // 5MB limit
+    if (file.size > 5 * 1024 * 1024) {
+      setError(
+        "Image size must be less than 5MB."
+      );
+      return;
+    }
+
+    setError("");
     setEvidence(file);
-  }
+  };
 
-  // ================================
+  // --------------------------------------------------
   // REMOVE EVIDENCE
-  // ================================
+  // --------------------------------------------------
 
-  function removeEvidence() {
+  const removeEvidence = () => {
     setEvidence(null);
-  }
 
-  // ================================
-  // SUBMIT
-  // ================================
+    // Reset file input
+    const fileInput =
+      document.getElementById(
+        "evidenceImage"
+      );
 
-  function handleSubmit(e) {
+    if (fileInput) {
+      fileInput.value = "";
+    }
+  };
+
+  // --------------------------------------------------
+  // SUBMIT REPORT
+  // --------------------------------------------------
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
-    console.log("Report Something I Saw:", {
-      ...form,
-      evidence,
-    });
+    setError("");
 
-    setSubmitted(true);
-  }
+    // ----------------------------------------------
+    // CHECK LOGIN
+    // ----------------------------------------------
 
-  // ================================
+    if (!auth.currentUser) {
+      setError(
+        "You must be logged in to submit a report."
+      );
+      return;
+    }
+
+    // ----------------------------------------------
+    // VALIDATION
+    // ----------------------------------------------
+
+    if (!date) {
+      setError(
+        "Please select when you observed the issue."
+      );
+      return;
+    }
+
+    if (!time) {
+      setError(
+        "Please select the approximate time."
+      );
+      return;
+    }
+
+    if (!location.trim()) {
+      setError(
+        "Please enter the approximate location."
+      );
+      return;
+    }
+
+    if (!category) {
+      setError(
+        "Please select an issue category."
+      );
+      return;
+    }
+
+    if (!description.trim()) {
+      setError(
+        "Please describe the issue."
+      );
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // ----------------------------------------------
+      // STEP 1: CREATE FIRESTORE REPORT
+      // ----------------------------------------------
+
+      const reportData = {
+        userId: auth.currentUser.uid,
+
+        reportType: "report-something",
+
+        category: category,
+
+        description: description.trim(),
+
+        observation: {
+          date: date,
+          time: time,
+        },
+
+        location: {
+          approximateLocation:
+            location.trim(),
+        },
+
+        evidence: {
+          hasImage: !!evidence,
+          imageUrl: null,
+          fileName: evidence
+            ? evidence.name
+            : null,
+          fileType: evidence
+            ? evidence.type
+            : null,
+        },
+
+        aiAnalysis: {
+          checked: false,
+          matchScore: null,
+          issueDetected: null,
+          result: "pending",
+        },
+
+        status: "reported",
+
+        createdAt: serverTimestamp(),
+      };
+
+      const reportRef = await addDoc(
+        collection(db, "reports"),
+        reportData
+      );
+
+      console.log(
+        "Report created:",
+        reportRef.id
+      );
+
+      // ----------------------------------------------
+      // STEP 2: UPLOAD OPTIONAL IMAGE TO IMAGEKIT
+      // ----------------------------------------------
+
+      if (evidence) {
+        const uploadedImage =
+          await uploadImage(
+            evidence,
+            `/citizen-reports/${auth.currentUser.uid}/${reportRef.id}`
+          );
+
+        console.log(
+          "ImageKit upload successful:",
+          uploadedImage
+        );
+
+        // --------------------------------------------
+        // STEP 3: SAVE IMAGE URL IN FIRESTORE
+        // --------------------------------------------
+
+        await updateDoc(
+          doc(db, "reports", reportRef.id),
+          {
+            "evidence.imageUrl":
+              uploadedImage.url,
+
+            "evidence.fileId":
+              uploadedImage.fileId,
+          }
+        );
+
+        console.log(
+          "Report updated with ImageKit URL."
+        );
+      }
+
+      // ----------------------------------------------
+      // SUCCESS
+      // ----------------------------------------------
+
+      setSuccess(true);
+
+    } catch (err) {
+      console.error(
+        "Report submission error:",
+        err
+      );
+
+      setError(
+        err.message ||
+          "Failed to submit the report. Please try again."
+      );
+
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --------------------------------------------------
   // SUCCESS SCREEN
-  // ================================
+  // --------------------------------------------------
 
-  if (submitted) {
+  if (success) {
     return (
       <div className="container py-5">
 
-        <div className="card shadow-sm">
-          <div className="card-body text-center p-5">
+        <div className="row justify-content-center">
 
-            <div
-              className="mb-3"
-              style={{
-                fontSize: "50px",
-              }}
-            >
-              ✓
+          <div className="col-md-7">
+
+            <div className="card shadow-sm border-0">
+
+              <div className="card-body text-center p-5">
+
+                <div
+                  className="mb-3"
+                  style={{ fontSize: "60px" }}
+                >
+                  ✅
+                </div>
+
+                <h2 className="fw-bold">
+                  Report Submitted
+                </h2>
+
+                <p className="text-muted">
+                  Your report has been successfully
+                  submitted.
+                </p>
+
+                <p className="small text-muted">
+                  The information will be used for
+                  further verification and prioritization.
+                </p>
+
+                <button
+                  className="btn btn-primary mt-3"
+                  onClick={() =>
+                    navigate("/citizen")
+                  }
+                >
+                  Back to Dashboard
+                </button>
+
+              </div>
+
             </div>
 
-            <h2 className="fw-bold">
-              Observation Recorded
-            </h2>
-
-            <p className="text-muted">
-              Your observation has been recorded.
-              It can be used with other citizen
-              reports to identify infrastructure
-              problems and demand hotspots.
-            </p>
-
-            <button
-              type="button"
-              className="btn btn-dark mt-3"
-              onClick={() =>
-                navigate("/citizen/dashboard")
-              }
-            >
-              Back to Dashboard
-            </button>
-
           </div>
+
         </div>
 
       </div>
     );
   }
 
-  // ================================
-  // MAIN PAGE
-  // ================================
+  // --------------------------------------------------
+  // MAIN UI
+  // --------------------------------------------------
 
   return (
-    <div className="container py-5">
+    <div className="container py-4">
 
-      {/* HEADER */}
+      <div className="row justify-content-center">
 
-      <div className="mb-4">
+        <div className="col-lg-8">
 
-        <button
-          type="button"
-          className="btn btn-outline-secondary mb-3"
-          onClick={() =>
-            navigate("/citizen/dashboard")
-          }
-        >
-          ← Back to Dashboard
-        </button>
+          {/* BACK BUTTON */}
 
-        <h2 className="fw-bold">
-          Report Something I Saw
-        </h2>
+          <div className="mb-4">
 
-        <p className="text-muted">
-          Report an infrastructure problem you
-          noticed earlier.
-        </p>
+            <button
+              className="btn btn-link p-0 text-decoration-none"
+              onClick={() =>
+                navigate("/citizen")
+              }
+            >
+              ← Back to Dashboard
+            </button>
 
-      </div>
+          </div>
 
-      {/* INFORMATION */}
+          {/* CARD */}
 
-      <div className="alert alert-info">
-        <strong>Note:</strong> This report is for
-        something you observed earlier. You can
-        provide the approximate location and time
-        of your observation.
-      </div>
+          <div className="card shadow-sm border-0">
 
-      {/* FORM */}
+            <div className="card-body p-4">
 
-      <div className="card shadow-sm">
+              <h2 className="fw-bold mb-2">
+                Report Something I Saw
+              </h2>
 
-        <div className="card-body p-4">
+              <p className="text-muted mb-4">
+                Report an infrastructure issue you
+                noticed earlier.
+              </p>
 
-          <form onSubmit={handleSubmit}>
+              {/* OBSERVATION DATE */}
 
-            {/* ============================
-                DATE
-            ============================= */}
+              <div className="row">
 
-            <div className="mb-3">
+                <div className="col-md-6 mb-3">
 
-              <label
-                htmlFor="date"
-                className="form-label fw-semibold"
-              >
-                When did you see it?
-              </label>
+                  <label className="form-label fw-semibold">
+                    Date Observed
+                  </label>
 
-              <input
-                type="date"
-                id="date"
-                name="date"
-                className="form-control"
-                value={form.date}
-                onChange={handleChange}
-                max={
-                  new Date()
-                    .toISOString()
-                    .split("T")[0]
-                }
-                required
-              />
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={date}
+                    max={
+                      new Date()
+                        .toISOString()
+                        .split("T")[0]
+                    }
+                    onChange={(e) =>
+                      setDate(e.target.value)
+                    }
+                  />
 
-            </div>
+                </div>
 
-            {/* ============================
-                TIME
-            ============================= */}
+                {/* OBSERVATION TIME */}
 
-            <div className="mb-3">
+                <div className="col-md-6 mb-3">
 
-              <label
-                htmlFor="time"
-                className="form-label fw-semibold"
-              >
-                Approximate time
-              </label>
+                  <label className="form-label fw-semibold">
+                    Approximate Time
+                  </label>
 
-              <input
-                type="time"
-                id="time"
-                name="time"
-                className="form-control"
-                value={form.time}
-                onChange={handleChange}
-                required
-              />
-
-            </div>
-
-            {/* ============================
-                LOCATION
-            ============================= */}
-
-            <div className="mb-3">
-
-              <label
-                htmlFor="location"
-                className="form-label fw-semibold"
-              >
-                Where did you see it?
-              </label>
-
-              <input
-                type="text"
-                id="location"
-                name="location"
-                className="form-control"
-                placeholder="Example: Near ABC School, Kukatpally"
-                value={form.location}
-                onChange={handleChange}
-                required
-              />
-
-              <div className="form-text">
-                Enter the place or landmark where
-                you observed the problem.
-              </div>
-
-            </div>
-
-            {/* ============================
-                CATEGORY
-            ============================= */}
-
-            <div className="mb-3">
-
-              <label
-                htmlFor="category"
-                className="form-label fw-semibold"
-              >
-                What type of problem was it?
-              </label>
-
-              <select
-                id="category"
-                name="category"
-                className="form-select"
-                value={form.category}
-                onChange={handleChange}
-                required
-              >
-
-                <option value="">
-                  Select a category
-                </option>
-
-                <option value="Road Damage">
-                  Road Damage / Pothole
-                </option>
-
-                <option value="Garbage">
-                  Garbage / Waste
-                </option>
-
-                <option value="Footpath">
-                  Damaged Footpath
-                </option>
-
-                <option value="Streetlight">
-                  Streetlight Problem
-                </option>
-
-                <option value="Water">
-                  Water Supply Problem
-                </option>
-
-                <option value="Drainage">
-                  Drainage / Sewage
-                </option>
-
-                <option value="Public Transport">
-                  Public Transport Problem
-                </option>
-
-                <option value="Other">
-                  Other
-                </option>
-
-              </select>
-
-            </div>
-
-            {/* ============================
-                DESCRIPTION
-            ============================= */}
-
-            <div className="mb-3">
-
-              <label
-                htmlFor="description"
-                className="form-label fw-semibold"
-              >
-                What did you see?
-              </label>
-
-              <textarea
-                id="description"
-                name="description"
-                className="form-control"
-                rows="5"
-                placeholder="Describe what you observed..."
-                value={form.description}
-                onChange={handleChange}
-                maxLength={1000}
-                required
-              />
-
-              <div className="form-text">
-                Maximum 1000 characters.
-              </div>
-
-            </div>
-
-            {/* ============================
-                OPTIONAL EVIDENCE
-            ============================= */}
-
-            <div className="mb-4">
-
-              <label
-                htmlFor="evidence"
-                className="form-label fw-semibold"
-              >
-                Optional Evidence
-              </label>
-
-              <input
-                type="file"
-                id="evidence"
-                className="form-control"
-                accept="image/*"
-                onChange={handleEvidenceChange}
-              />
-
-              <div className="form-text">
-                You may provide a photo if you
-                already have one.
-              </div>
-
-            </div>
-
-            {/* EVIDENCE PREVIEW */}
-
-            {evidence && (
-              <div className="alert alert-secondary">
-
-                <div className="d-flex justify-content-between align-items-center">
-
-                  <div>
-                    <strong>
-                      Evidence selected:
-                    </strong>
-
-                    <br />
-
-                    <span>
-                      {evidence.name}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-danger"
-                    onClick={removeEvidence}
-                  >
-                    Remove
-                  </button>
+                  <input
+                    type="time"
+                    className="form-control"
+                    value={time}
+                    onChange={(e) =>
+                      setTime(e.target.value)
+                    }
+                  />
 
                 </div>
 
               </div>
-            )}
 
-            {/* ============================
-                SUBMIT
-            ============================= */}
+              {/* LOCATION */}
 
-            <button
-              type="submit"
-              className="btn btn-dark w-100"
-            >
-              Submit Observation
-            </button>
+              <div className="mb-3">
 
-          </form>
+                <label className="form-label fw-semibold">
+                  Approximate Location
+                </label>
+
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Example: Near Kukatpally Metro Station"
+                  value={location}
+                  onChange={(e) =>
+                    setLocation(e.target.value)
+                  }
+                />
+
+                <div className="form-text">
+                  Enter a landmark, street, area,
+                  junction, or other useful location
+                  information.
+                </div>
+
+              </div>
+
+              {/* CATEGORY */}
+
+              <div className="mb-3">
+
+                <label className="form-label fw-semibold">
+                  Issue Category
+                </label>
+
+                <select
+                  className="form-select"
+                  value={category}
+                  onChange={(e) =>
+                    setCategory(e.target.value)
+                  }
+                >
+
+                  <option value="">
+                    Select an issue
+                  </option>
+
+                  <option value="Road Damage">
+                    Road Damage
+                  </option>
+
+                  <option value="Garbage">
+                    Garbage
+                  </option>
+
+                  <option value="Footpath">
+                    Footpath
+                  </option>
+
+                  <option value="Streetlight">
+                    Streetlight
+                  </option>
+
+                  <option value="Water">
+                    Water
+                  </option>
+
+                  <option value="Drainage">
+                    Drainage
+                  </option>
+
+                  <option value="Public Transport">
+                    Public Transport
+                  </option>
+
+                  <option value="Other">
+                    Other
+                  </option>
+
+                </select>
+
+              </div>
+
+              {/* DESCRIPTION */}
+
+              <div className="mb-3">
+
+                <label className="form-label fw-semibold">
+                  Describe the Issue
+                </label>
+
+                <textarea
+                  className="form-control"
+                  rows="5"
+                  maxLength="1000"
+                  placeholder="Describe what you observed..."
+                  value={description}
+                  onChange={(e) =>
+                    setDescription(
+                      e.target.value
+                    )
+                  }
+                />
+
+                <div className="text-end small text-muted mt-1">
+                  {description.length}/1000
+                </div>
+
+              </div>
+
+              {/* OPTIONAL EVIDENCE */}
+
+              <div className="mb-4">
+
+                <label className="form-label fw-semibold">
+                  Evidence Image
+                  <span className="text-muted fw-normal">
+                    {" "}
+                    (Optional)
+                  </span>
+                </label>
+
+                <input
+                  id="evidenceImage"
+                  type="file"
+                  className="form-control"
+                  accept="image/*"
+                  onChange={
+                    handleEvidenceChange
+                  }
+                />
+
+                <div className="form-text">
+                  You can optionally upload an image
+                  related to what you observed.
+                  Maximum size: 5MB.
+                </div>
+
+                {/* SELECTED IMAGE */}
+
+                {evidence && (
+                  <div className="card mt-3">
+
+                    <div className="card-body">
+
+                      <div className="d-flex justify-content-between align-items-center">
+
+                        <div>
+                          <strong>
+                            Selected Image
+                          </strong>
+
+                          <div className="small text-muted">
+                            {evidence.name}
+                          </div>
+
+                          <div className="small text-muted">
+                            {(
+                              evidence.size /
+                              (1024 * 1024)
+                            ).toFixed(2)}{" "}
+                            MB
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={
+                            removeEvidence
+                          }
+                        >
+                          Remove
+                        </button>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+                )}
+
+              </div>
+
+              {/* ERROR */}
+
+              {error && (
+                <div className="alert alert-danger">
+                  {error}
+                </div>
+              )}
+
+              {/* SUBMIT */}
+
+              <button
+                type="submit"
+                className="btn btn-primary w-100"
+                disabled={loading}
+                onClick={handleSubmit}
+              >
+                {loading
+                  ? "Submitting Report..."
+                  : "Submit Report"}
+              </button>
+
+            </div>
+
+          </div>
 
         </div>
 
