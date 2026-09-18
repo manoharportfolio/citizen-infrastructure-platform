@@ -1,14 +1,21 @@
-import { useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
+
 import { useNavigate } from "react-router-dom";
+
 import {
   addDoc,
   collection,
   serverTimestamp,
-  updateDoc,
-  doc,
 } from "firebase/firestore";
+
 import { auth, db } from "../firebase/config";
+
 import { uploadImage } from "../services/imageService";
+
+import { analyzeComplaint } from "../services/aiService";
 
 function ReportSomething() {
   const navigate = useNavigate();
@@ -20,34 +27,56 @@ function ReportSomething() {
 
   const [category, setCategory] = useState("");
 
-  const [description, setDescription] = useState("");
+  const [description, setDescription] =
+    useState("");
 
-  const [evidence, setEvidence] = useState(null);
+  const [evidence, setEvidence] =
+    useState(null);
 
-  const [loading, setLoading] = useState(false);
+  const [imageUrl, setImageUrl] =
+    useState("");
 
-  const [success, setSuccess] = useState(false);
+  const [imageUploading, setImageUploading] =
+    useState(false);
 
-  const [error, setError] = useState("");
+  const [aiChecking, setAiChecking] =
+    useState(false);
 
-  // --------------------------------------------------
-  // FILE SELECTION
-  // --------------------------------------------------
+  const [aiImageAnalysis, setAiImageAnalysis] =
+    useState(null);
 
-  const handleEvidenceChange = (e) => {
+  const [aiVerification, setAiVerification] =
+    useState(null);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [success, setSuccess] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  // ==================================================
+  // IMAGE SELECT
+  // ==================================================
+
+  const handleEvidenceChange = async (e) => {
     const file = e.target.files?.[0];
 
     if (!file) {
       return;
     }
 
-    // Check file type
+    setError("");
+
     if (!file.type.startsWith("image/")) {
-      setError("Please select an image file.");
+      setError(
+        "Please select an image file."
+      );
       return;
     }
 
-    // 5MB limit
     if (file.size > 5 * 1024 * 1024) {
       setError(
         "Image size must be less than 5MB."
@@ -55,40 +84,185 @@ function ReportSomething() {
       return;
     }
 
-    setError("");
     setEvidence(file);
+
+    setImageUrl("");
+
+    setAiImageAnalysis(null);
+
+    setAiVerification(null);
+
+    try {
+      setImageUploading(true);
+
+      // ----------------------------------------------
+      // UPLOAD TO IMAGEKIT
+      // ----------------------------------------------
+
+      const uploadedImage =
+        await uploadImage(
+          file,
+          `/citizen-reports/${auth.currentUser?.uid || "unknown"}/temporary`
+        );
+
+      setImageUrl(
+        uploadedImage.url
+      );
+
+      setImageUploading(false);
+
+      // ----------------------------------------------
+      // AI IMAGE ANALYSIS
+      // ----------------------------------------------
+
+      setAiChecking(true);
+
+      const result =
+        await analyzeComplaint({
+          imageUrl:
+            uploadedImage.url,
+
+          category: "",
+
+          description: "",
+
+          mode: "image-only",
+        });
+
+      setAiImageAnalysis(
+        result.imageAssessment || null
+      );
+
+      setAiChecking(false);
+
+    } catch (err) {
+      console.error(
+        "Evidence processing error:",
+        err
+      );
+
+      setImageUploading(false);
+      setAiChecking(false);
+
+      setError(
+        err.message ||
+          "Failed to process the evidence."
+      );
+    }
   };
 
-  // --------------------------------------------------
-  // REMOVE EVIDENCE
-  // --------------------------------------------------
+  // ==================================================
+  // REMOVE IMAGE
+  // ==================================================
 
   const removeEvidence = () => {
     setEvidence(null);
 
-    // Reset file input
-    const fileInput =
+    setImageUrl("");
+
+    setAiImageAnalysis(null);
+
+    setAiVerification(null);
+
+    const input =
       document.getElementById(
         "evidenceImage"
       );
 
-    if (fileInput) {
-      fileInput.value = "";
+    if (input) {
+      input.value = "";
     }
   };
 
-  // --------------------------------------------------
-  // SUBMIT REPORT
-  // --------------------------------------------------
+  // ==================================================
+  // FULL AI CHECK
+  // ==================================================
+
+  const runFullAICheck = async () => {
+    if (
+      !imageUrl ||
+      !category.trim() ||
+      !description.trim()
+    ) {
+      return;
+    }
+
+    try {
+      setError("");
+
+      setAiChecking(true);
+
+      setAiVerification(null);
+
+      const result =
+        await analyzeComplaint({
+          imageUrl,
+
+          category,
+
+          description,
+
+          mode: "full-check",
+        });
+
+      setAiVerification(
+        result.consistency || null
+      );
+
+      setAiChecking(false);
+
+    } catch (err) {
+      console.error(
+        "AI verification error:",
+        err
+      );
+
+      setAiChecking(false);
+
+      setAiVerification({
+        approved: false,
+        score: 0,
+        categoryMatch: false,
+        descriptionMatch: false,
+        reason:
+          "AI verification could not be completed.",
+      });
+    }
+  };
+
+  // ==================================================
+  // AUTOMATIC FINAL CHECK
+  // ==================================================
+
+  useEffect(() => {
+    if (
+      !imageUrl ||
+      !category.trim() ||
+      !description.trim()
+    ) {
+      setAiVerification(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      runFullAICheck();
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [
+    imageUrl,
+    category,
+    description,
+  ]);
+
+  // ==================================================
+  // SUBMIT
+  // ==================================================
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
     setError("");
-
-    // ----------------------------------------------
-    // CHECK LOGIN
-    // ----------------------------------------------
 
     if (!auth.currentUser) {
       setError(
@@ -96,10 +270,6 @@ function ReportSomething() {
       );
       return;
     }
-
-    // ----------------------------------------------
-    // VALIDATION
-    // ----------------------------------------------
 
     if (!date) {
       setError(
@@ -136,25 +306,49 @@ function ReportSomething() {
       return;
     }
 
+    if (!evidence || !imageUrl) {
+      setError(
+        "Evidence photo is required."
+      );
+      return;
+    }
+
+    if (imageUploading || aiChecking) {
+      setError(
+        "Please wait for the AI evidence check to finish."
+      );
+      return;
+    }
+
+    if (
+      !aiVerification ||
+      !aiVerification.approved
+    ) {
+      setError(
+        "The AI consistency check has not passed. Please review your photo, category, and description."
+      );
+      return;
+    }
+
     try {
       setLoading(true);
 
-      // ----------------------------------------------
-      // STEP 1: CREATE FIRESTORE REPORT
-      // ----------------------------------------------
-
       const reportData = {
-        userId: auth.currentUser.uid,
+        userId:
+          auth.currentUser.uid,
 
-        reportType: "report-something",
+        reportType:
+          "report-something",
 
-        category: category,
+        category,
 
-        description: description.trim(),
+        description:
+          description.trim(),
 
         observation: {
-          date: date,
-          time: time,
+          date,
+
+          time,
         },
 
         location: {
@@ -163,77 +357,62 @@ function ReportSomething() {
         },
 
         evidence: {
-          hasImage: !!evidence,
-          imageUrl: null,
-          fileName: evidence
-            ? evidence.name
-            : null,
-          fileType: evidence
-            ? evidence.type
-            : null,
+          hasImage: true,
+
+          imageUrl,
+
+          fileName:
+            evidence.name,
+
+          fileType:
+            evidence.type,
         },
 
         aiAnalysis: {
-          checked: false,
-          matchScore: null,
-          issueDetected: null,
-          result: "pending",
+          checked: true,
+
+          imageDetectedIssue:
+            aiImageAnalysis?.detectedIssue ||
+            null,
+
+          visualConfidence:
+            aiImageAnalysis?.confidence ||
+            null,
+
+          categoryMatch:
+            aiVerification.categoryMatch ||
+            false,
+
+          descriptionMatch:
+            aiVerification.descriptionMatch ||
+            false,
+
+          consistencyScore:
+            aiVerification.score || 0,
+
+          result: "passed",
         },
 
-        status: "reported",
+        status:
+          "reported",
 
-        createdAt: serverTimestamp(),
+        createdAt:
+          serverTimestamp(),
       };
 
-      const reportRef = await addDoc(
-        collection(db, "reports"),
-        reportData
-      );
+      const reportRef =
+        await addDoc(
+          collection(
+            db,
+            "reports"
+          ),
+          reportData
+        );
 
       console.log(
-        "Report created:",
+        "Report submitted:",
         reportRef.id
       );
-
-      // ----------------------------------------------
-      // STEP 2: UPLOAD OPTIONAL IMAGE TO IMAGEKIT
-      // ----------------------------------------------
-
-      if (evidence) {
-        const uploadedImage =
-          await uploadImage(
-            evidence,
-            `/citizen-reports/${auth.currentUser.uid}/${reportRef.id}`
-          );
-
-        console.log(
-          "ImageKit upload successful:",
-          uploadedImage
-        );
-
-        // --------------------------------------------
-        // STEP 3: SAVE IMAGE URL IN FIRESTORE
-        // --------------------------------------------
-
-        await updateDoc(
-          doc(db, "reports", reportRef.id),
-          {
-            "evidence.imageUrl":
-              uploadedImage.url,
-
-            "evidence.fileId":
-              uploadedImage.fileId,
-          }
-        );
-
-        console.log(
-          "Report updated with ImageKit URL."
-        );
-      }
-
-      // ----------------------------------------------
-      // SUCCESS
-      // ----------------------------------------------
 
       setSuccess(true);
 
@@ -245,7 +424,7 @@ function ReportSomething() {
 
       setError(
         err.message ||
-          "Failed to submit the report. Please try again."
+          "Failed to submit the report."
       );
 
     } finally {
@@ -253,9 +432,9 @@ function ReportSomething() {
     }
   };
 
-  // --------------------------------------------------
-  // SUCCESS SCREEN
-  // --------------------------------------------------
+  // ==================================================
+  // SUCCESS
+  // ==================================================
 
   if (success) {
     return (
@@ -271,7 +450,9 @@ function ReportSomething() {
 
                 <div
                   className="mb-3"
-                  style={{ fontSize: "60px" }}
+                  style={{
+                    fontSize: "60px",
+                  }}
                 >
                   ✅
                 </div>
@@ -281,19 +462,18 @@ function ReportSomething() {
                 </h2>
 
                 <p className="text-muted">
-                  Your report has been successfully
+                  Your report passed the AI
+                  evidence consistency check
+                  and was successfully
                   submitted.
-                </p>
-
-                <p className="small text-muted">
-                  The information will be used for
-                  further verification and prioritization.
                 </p>
 
                 <button
                   className="btn btn-primary mt-3"
                   onClick={() =>
-                    navigate("/citizen")
+                    navigate(
+                      "/citizen"
+                    )
                   }
                 >
                   Back to Dashboard
@@ -311,9 +491,9 @@ function ReportSomething() {
     );
   }
 
-  // --------------------------------------------------
-  // MAIN UI
-  // --------------------------------------------------
+  // ==================================================
+  // UI
+  // ==================================================
 
   return (
     <div className="container py-4">
@@ -322,286 +502,525 @@ function ReportSomething() {
 
         <div className="col-lg-8">
 
-          {/* BACK BUTTON */}
-
-          <div className="mb-4">
-
-            <button
-              className="btn btn-link p-0 text-decoration-none"
-              onClick={() =>
-                navigate("/citizen")
-              }
-            >
-              ← Back to Dashboard
-            </button>
-
-          </div>
-
-          {/* CARD */}
+          <button
+            className="btn btn-link p-0 text-decoration-none mb-4"
+            onClick={() =>
+              navigate(
+                "/citizen"
+              )
+            }
+          >
+            ← Back to Dashboard
+          </button>
 
           <div className="card shadow-sm border-0">
 
             <div className="card-body p-4">
 
-              <h2 className="fw-bold mb-2">
-                Report Something I Saw
+              <h2 className="fw-bold mb-1">
+                Log Past Sighting
               </h2>
 
               <p className="text-muted mb-4">
-                Report an infrastructure issue you
-                noticed earlier.
+                Report an issue you saw
+                previously. Evidence helps AI
+                validate the report.
               </p>
 
-              {/* OBSERVATION DATE */}
+              <form
+                onSubmit={
+                  handleSubmit
+                }
+              >
 
-              <div className="row">
+                {/* LOCATION */}
 
-                <div className="col-md-6 mb-3">
+                <div className="card mb-4">
 
-                  <label className="form-label fw-semibold">
-                    Date Observed
-                  </label>
+                  <div className="card-body">
 
-                  <input
-                    type="date"
-                    className="form-control"
-                    value={date}
-                    max={
-                      new Date()
-                        .toISOString()
-                        .split("T")[0]
-                    }
-                    onChange={(e) =>
-                      setDate(e.target.value)
-                    }
-                  />
+                    <h6 className="fw-bold">
+                      📍 Location Details
+                    </h6>
 
-                </div>
+                    <hr />
 
-                {/* OBSERVATION TIME */}
+                    <label className="form-label">
+                      Approximate Address or Landmark
+                    </label>
 
-                <div className="col-md-6 mb-3">
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="E.g., Near City Hospital main gate..."
+                      value={
+                        location
+                      }
+                      onChange={(e) =>
+                        setLocation(
+                          e.target
+                            .value
+                        )
+                      }
+                    />
 
-                  <label className="form-label fw-semibold">
-                    Approximate Time
-                  </label>
-
-                  <input
-                    type="time"
-                    className="form-control"
-                    value={time}
-                    onChange={(e) =>
-                      setTime(e.target.value)
-                    }
-                  />
+                  </div>
 
                 </div>
 
-              </div>
+                {/* ISSUE */}
 
-              {/* LOCATION */}
+                <div className="card mb-4">
 
-              <div className="mb-3">
+                  <div className="card-body">
 
-                <label className="form-label fw-semibold">
-                  Approximate Location
-                </label>
+                    <h6 className="fw-bold">
+                      ⚠️ Issue Information
+                    </h6>
 
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Example: Near Kukatpally Metro Station"
-                  value={location}
-                  onChange={(e) =>
-                    setLocation(e.target.value)
-                  }
-                />
+                    <hr />
 
-                <div className="form-text">
-                  Enter a landmark, street, area,
-                  junction, or other useful location
-                  information.
-                </div>
+                    <div className="row">
 
-              </div>
+                      <div className="col-md-6 mb-3">
 
-              {/* CATEGORY */}
+                        <label className="form-label">
+                          Date Observed
+                        </label>
 
-              <div className="mb-3">
-
-                <label className="form-label fw-semibold">
-                  Issue Category
-                </label>
-
-                <select
-                  className="form-select"
-                  value={category}
-                  onChange={(e) =>
-                    setCategory(e.target.value)
-                  }
-                >
-
-                  <option value="">
-                    Select an issue
-                  </option>
-
-                  <option value="Road Damage">
-                    Road Damage
-                  </option>
-
-                  <option value="Garbage">
-                    Garbage
-                  </option>
-
-                  <option value="Footpath">
-                    Footpath
-                  </option>
-
-                  <option value="Streetlight">
-                    Streetlight
-                  </option>
-
-                  <option value="Water">
-                    Water
-                  </option>
-
-                  <option value="Drainage">
-                    Drainage
-                  </option>
-
-                  <option value="Public Transport">
-                    Public Transport
-                  </option>
-
-                  <option value="Other">
-                    Other
-                  </option>
-
-                </select>
-
-              </div>
-
-              {/* DESCRIPTION */}
-
-              <div className="mb-3">
-
-                <label className="form-label fw-semibold">
-                  Describe the Issue
-                </label>
-
-                <textarea
-                  className="form-control"
-                  rows="5"
-                  maxLength="1000"
-                  placeholder="Describe what you observed..."
-                  value={description}
-                  onChange={(e) =>
-                    setDescription(
-                      e.target.value
-                    )
-                  }
-                />
-
-                <div className="text-end small text-muted mt-1">
-                  {description.length}/1000
-                </div>
-
-              </div>
-
-              {/* OPTIONAL EVIDENCE */}
-
-              <div className="mb-4">
-
-                <label className="form-label fw-semibold">
-                  Evidence Image
-                  <span className="text-muted fw-normal">
-                    {" "}
-                    (Optional)
-                  </span>
-                </label>
-
-                <input
-                  id="evidenceImage"
-                  type="file"
-                  className="form-control"
-                  accept="image/*"
-                  onChange={
-                    handleEvidenceChange
-                  }
-                />
-
-                <div className="form-text">
-                  You can optionally upload an image
-                  related to what you observed.
-                  Maximum size: 5MB.
-                </div>
-
-                {/* SELECTED IMAGE */}
-
-                {evidence && (
-                  <div className="card mt-3">
-
-                    <div className="card-body">
-
-                      <div className="d-flex justify-content-between align-items-center">
-
-                        <div>
-                          <strong>
-                            Selected Image
-                          </strong>
-
-                          <div className="small text-muted">
-                            {evidence.name}
-                          </div>
-
-                          <div className="small text-muted">
-                            {(
-                              evidence.size /
-                              (1024 * 1024)
-                            ).toFixed(2)}{" "}
-                            MB
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-danger"
-                          onClick={
-                            removeEvidence
+                        <input
+                          type="date"
+                          className="form-control"
+                          value={date}
+                          max={
+                            new Date()
+                              .toISOString()
+                              .split(
+                                "T"
+                              )[0]
                           }
-                        >
-                          Remove
-                        </button>
+                          onChange={(e) =>
+                            setDate(
+                              e.target
+                                .value
+                            )
+                          }
+                        />
+
+                      </div>
+
+                      <div className="col-md-6 mb-3">
+
+                        <label className="form-label">
+                          Approximate Time
+                        </label>
+
+                        <input
+                          type="time"
+                          className="form-control"
+                          value={time}
+                          onChange={(e) =>
+                            setTime(
+                              e.target
+                                .value
+                            )
+                          }
+                        />
 
                       </div>
 
                     </div>
 
+                    <div className="mb-3">
+
+                      <label className="form-label">
+                        Category
+                      </label>
+
+                      <select
+                        className="form-select"
+                        value={
+                          category
+                        }
+                        onChange={(e) =>
+                          setCategory(
+                            e.target
+                              .value
+                          )
+                        }
+                      >
+
+                        <option value="">
+                          Select category
+                        </option>
+
+                        <option value="Road Damage">
+                          Roads & Potholes
+                        </option>
+
+                        <option value="Garbage">
+                          Garbage
+                        </option>
+
+                        <option value="Footpath">
+                          Footpath
+                        </option>
+
+                        <option value="Streetlight">
+                          Streetlight
+                        </option>
+
+                        <option value="Water">
+                          Water
+                        </option>
+
+                        <option value="Drainage">
+                          Drainage
+                        </option>
+
+                        <option value="Public Transport">
+                          Public Transport
+                        </option>
+
+                        <option value="Other">
+                          Other
+                        </option>
+
+                      </select>
+
+                    </div>
+
+                    <div>
+
+                      <label className="form-label">
+                        Description
+                      </label>
+
+                      <textarea
+                        className="form-control"
+                        rows="4"
+                        maxLength="1000"
+                        placeholder="Describe the issue in detail..."
+                        value={
+                          description
+                        }
+                        onChange={(e) =>
+                          setDescription(
+                            e.target
+                              .value
+                          )
+                        }
+                      />
+
+                      <small className="text-muted">
+                        {
+                          description.length
+                        }
+                        /1000
+                      </small>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+                {/* EVIDENCE */}
+
+                <div className="card mb-4">
+
+                  <div className="card-body">
+
+                    <div className="d-flex justify-content-between">
+
+                      <h6 className="fw-bold">
+                        📷 Visual Evidence
+                      </h6>
+
+                      <span className="badge text-bg-warning">
+                        Required
+                      </span>
+
+                    </div>
+
+                    <hr />
+
+                    <input
+                      id="evidenceImage"
+                      type="file"
+                      className="form-control"
+                      accept="image/*"
+                      onChange={
+                        handleEvidenceChange
+                      }
+                    />
+
+                    <small className="text-muted d-block mt-2">
+                      Upload a photo related
+                      to the issue. Maximum
+                      size: 5MB.
+                    </small>
+
+                    {evidence && (
+                      <div className="mt-3">
+
+                        <div className="d-flex justify-content-between align-items-center">
+
+                          <div>
+                            <strong>
+                              Selected:
+                            </strong>{" "}
+                            {
+                              evidence.name
+                            }
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={
+                              removeEvidence
+                            }
+                          >
+                            Remove
+                          </button>
+
+                        </div>
+
+                      </div>
+                    )}
+
+                  </div>
+
+                </div>
+
+                {/* AI IMAGE ANALYSIS */}
+
+                {(imageUploading ||
+                  aiChecking ||
+                  aiImageAnalysis) && (
+
+                  <div className="card border-primary mb-4">
+
+                    <div className="card-body">
+
+                      <h6 className="fw-bold">
+                        🤖 AI Evidence Analysis
+                      </h6>
+
+                      {imageUploading && (
+                        <div className="alert alert-info mt-3 mb-0">
+                          Uploading evidence
+                          securely...
+                        </div>
+                      )}
+
+                      {!imageUploading &&
+                        aiChecking &&
+                        !aiVerification && (
+                          <div className="alert alert-info mt-3 mb-0">
+                            🤖 AI is analyzing
+                            the uploaded image...
+                          </div>
+                        )}
+
+                      {aiImageAnalysis && (
+                        <div className="mt-3">
+
+                          <div className="alert alert-success">
+                            ✓ Image analyzed
+                          </div>
+
+                          <div>
+                            <strong>
+                              Detected issue:
+                            </strong>{" "}
+                            {
+                              aiImageAnalysis.detectedIssue ||
+                              "Unable to determine"
+                            }
+                          </div>
+
+                          <div>
+                            <strong>
+                              Visual confidence:
+                            </strong>{" "}
+                            {
+                              aiImageAnalysis.confidence ??
+                              0
+                            }
+                            %
+                          </div>
+
+                        </div>
+                      )}
+
+                    </div>
+
+                  </div>
+
+                )}
+
+                {/* FINAL AI CHECK */}
+
+                {imageUrl &&
+                  category &&
+                  description.trim() && (
+
+                    <div className="card mb-4">
+
+                      <div className="card-body">
+
+                        <h6 className="fw-bold">
+                          🤖 AI Complaint Verification
+                        </h6>
+
+                        {aiChecking ? (
+
+                          <div className="alert alert-info mt-3 mb-0">
+                            🤖 Checking the photo
+                            against your category
+                            and description...
+                          </div>
+
+                        ) : aiVerification ? (
+
+                          <div className="mt-3">
+
+                            {aiVerification.approved ? (
+
+                              <div className="alert alert-success mb-0">
+
+                                <h6 className="fw-bold">
+                                  ✓ Information appears
+                                  consistent
+                                </h6>
+
+                                <div>
+                                  Category match:{" "}
+                                  {aiVerification.categoryMatch
+                                    ? "✓"
+                                    : "✗"}
+                                </div>
+
+                                <div>
+                                  Description match:{" "}
+                                  {aiVerification.descriptionMatch
+                                    ? "✓"
+                                    : "✗"}
+                                </div>
+
+                                <div className="mt-2">
+                                  Consistency score:{" "}
+                                  <strong>
+                                    {
+                                      aiVerification.score
+                                    }
+                                    %
+                                  </strong>
+                                </div>
+
+                                <small className="d-block mt-2">
+                                  {
+                                    aiVerification.reason
+                                  }
+                                </small>
+
+                              </div>
+
+                            ) : (
+
+                              <div className="alert alert-warning mb-0">
+
+                                <h6 className="fw-bold">
+                                  ⚠ Review Required
+                                </h6>
+
+                                <div>
+                                  {
+                                    aiVerification.reason
+                                  }
+                                </div>
+
+                                <div className="mt-2">
+                                  Consistency score:{" "}
+                                  <strong>
+                                    {
+                                      aiVerification.score
+                                    }
+                                    %
+                                  </strong>
+                                </div>
+
+                              </div>
+
+                            )}
+
+                          </div>
+
+                        ) : (
+
+                          <div className="alert alert-secondary mt-3 mb-0">
+                            AI verification will
+                            run automatically after
+                            the required information
+                            is entered.
+                          </div>
+
+                        )}
+
+                      </div>
+
+                    </div>
+                  )}
+
+                {/* CONFIRMATION */}
+
+                <div className="alert alert-info">
+
+                  <small>
+                    ℹ By submitting this report,
+                    you confirm that the information
+                    is accurate. AI checks whether
+                    the submitted information appears
+                    consistent with the visual
+                    evidence.
+                  </small>
+
+                </div>
+
+                {/* ERROR */}
+
+                {error && (
+                  <div className="alert alert-danger">
+                    {error}
                   </div>
                 )}
 
-              </div>
+                {/* SUBMIT */}
 
-              {/* ERROR */}
+                <button
+                  type="submit"
+                  className="btn btn-primary w-100"
+                  disabled={
+                    loading ||
+                    imageUploading ||
+                    aiChecking ||
+                    !aiVerification?.approved
+                  }
+                >
+                  {loading
+                    ? "Submitting..."
+                    : imageUploading
+                    ? "Uploading Evidence..."
+                    : aiChecking
+                    ? "AI Checking..."
+                    : !aiVerification?.approved
+                    ? "Complete AI Verification First"
+                    : "✓ Confirm & Submit Report"}
+                </button>
 
-              {error && (
-                <div className="alert alert-danger">
-                  {error}
-                </div>
-              )}
-
-              {/* SUBMIT */}
-
-              <button
-                type="submit"
-                className="btn btn-primary w-100"
-                disabled={loading}
-                onClick={handleSubmit}
-              >
-                {loading
-                  ? "Submitting Report..."
-                  : "Submit Report"}
-              </button>
+              </form>
 
             </div>
 

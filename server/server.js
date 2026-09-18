@@ -4,12 +4,14 @@ import dotenv from "dotenv";
 
 import otpRoutes from "./routes/otpRoutes.js";
 import imageRoutes from "./routes/imageRoutes.js";
+import aiRoutes from "./routes/aiRoutes.js";
 
 dotenv.config();
 
 const app = express();
 
-const PORT = process.env.PORT || 5000;
+const PORT =
+  process.env.PORT || 5000;
 
 app.use(
   cors({
@@ -26,9 +28,20 @@ app.get("/", (req, res) => {
   });
 });
 
-app.use("/api/otp", otpRoutes);
+app.use(
+  "/api/otp",
+  otpRoutes
+);
 
-app.use("/api/images", imageRoutes);
+app.use(
+  "/api/images",
+  imageRoutes
+);
+
+app.use(
+  "/api/ai",
+  aiRoutes
+);
 
 app.listen(PORT, () => {
   console.log(
