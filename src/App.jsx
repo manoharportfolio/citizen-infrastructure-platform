@@ -1,82 +1,161 @@
-import { Routes, Route } from "react-router-dom";
+import {
+  Routes,
+  Route,
+  Navigate
+} from "react-router-dom";
 
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import ProtectedRoute from "./components/ProtectedRoute";
+import CitizenProfile from "./pages/CitizenProfile";
 
+// Public pages
 import Home from "./pages/Home";
-import RoleSelection from "./pages/RoleSelection";
+import ExploreComplaints from "./pages/ExploreComplaints";
+import ComplaintDetails from "./pages/ComplaintDetails";
+import AreaIntelligence from "./pages/AreaIntelligence";
 
-import CitizenRegister from "./pages/CitizenRegister";
+// Citizen authentication
 import CitizenLogin from "./pages/CitizenLogin";
+import CitizenRegister from "./pages/CitizenRegister";
+
+// Protected citizen pages
 import CitizenDashboard from "./pages/CitizenDashboard";
-import ReportSomething from "./pages/ReportSomething.jsx";
-
-import GovernmentRegister from "./pages/GovernmentRegister";
-import GovernmentLogin from "./pages/GovernmentLogin";
-import GovernmentDashboard from "./pages/GovernmentDashboard";
-
-import ReportNow from "./pages/ReportNow.jsx";
+import ReportNow from "./pages/ReportNow";
+import ReportSomething from "./pages/ReportSomething";
+import MyReports from "./pages/MyReports";
 
 function App() {
   return (
     <div className="app-wrapper">
+
+      {/* NAVBAR */}
       <Navbar />
 
       <main className="main-content">
         <Routes>
-          <Route path="/" element={<Home />} />
 
+          {/* =========================================
+              PUBLIC PAGES
+          ========================================= */}
+
+          {/* Home */}
           <Route
-            path="/select-role"
-            element={<RoleSelection />}
+            path="/"
+            element={<Home />}
+          />
+
+          {/* Explore all public complaints */}
+          <Route
+            path="/explore"
+            element={<ExploreComplaints />}
           />
 
           <Route
-            path="/citizen/register"
-            element={<CitizenRegister />}
+  path="/citizen/profile"
+  element={
+    <ProtectedRoute>
+      <CitizenProfile />
+    </ProtectedRoute>
+  }
+/>
+
+          {/* Area-specific complaint intelligence */}
+          <Route
+            path="/area/:areaName"
+            element={<AreaIntelligence />}
           />
 
+          {/* Individual public complaint */}
+          <Route
+            path="/complaint/:id"
+            element={<ComplaintDetails />}
+          />
+
+
+          {/* =========================================
+              CITIZEN AUTHENTICATION
+          ========================================= */}
+
+          {/* Login */}
           <Route
             path="/citizen/login"
             element={<CitizenLogin />}
           />
 
+          {/* Register */}
+          <Route
+            path="/citizen/register"
+            element={<CitizenRegister />}
+          />
+
+
+          {/* =========================================
+              PROTECTED CITIZEN PAGES
+          ========================================= */}
+
+          {/* Citizen dashboard */}
           <Route
             path="/citizen/dashboard"
-            element={<CitizenDashboard />}
+            element={
+              <ProtectedRoute>
+                <CitizenDashboard />
+              </ProtectedRoute>
+            }
           />
 
+          {/* Report a problem happening now */}
           <Route
             path="/citizen/report-now"
-            element={<ReportNow />}
+            element={
+              <ProtectedRoute>
+                <ReportNow />
+              </ProtectedRoute>
+            }
           />
 
+          {/* Report something the citizen saw earlier */}
           <Route
             path="/citizen/report-something"
-            element={<ReportSomething />}
+            element={
+              <ProtectedRoute>
+                <ReportSomething />
+              </ProtectedRoute>
+            }
           />
 
+          {/* Citizen's own reports */}
           <Route
-            path="/government/register"
-            element={<GovernmentRegister />}
+            path="/citizen/my-reports"
+            element={
+              <ProtectedRoute>
+                <MyReports />
+              </ProtectedRoute>
+            }
           />
 
+
+          {/* =========================================
+              FALLBACK
+          ========================================= */}
+
+          {/* Any unknown URL goes back to Home */}
           <Route
-            path="/government/login"
-            element={<GovernmentLogin />}
+            path="*"
+            element={
+              <Navigate
+                to="/"
+                replace
+              />
+            }
           />
-
-          <Route
-            path="/government/dashboard"
-            element={<GovernmentDashboard />}
-          />
-
-
 
         </Routes>
       </main>
 
+      {/* FOOTER */}
       <Footer />
+
     </div>
   );
 }

@@ -1,256 +1,99 @@
 import express from "express";
-import crypto from "crypto";
+import {
+  getAuth
+} from "firebase-admin/auth";
 
+import { adminAuth } from "../services/firebaseAdmin.js";
 import { sendEmailOTP } from "../services/emailService.js";
-import { sendPhoneOTP } from "../services/phoneService.js";
 
 const router = express.Router();
 
 const otpStore = new Map();
 
-const OTP_EXPIRY = 15 * 60 * 1000;
-const RESEND_COOLDOWN = 30 * 1000;
+const OTP_EXPIRY_MS =
+  15 * 60 * 1000;
+
+const RESEND_COOLDOWN_MS =
+  30 * 1000;
+
 const MAX_ATTEMPTS = 5;
 
 function generateOTP() {
-  return crypto
-    .randomInt(100000, 1000000)
-    .toString();
+  return Math.floor(
+    100000 +
+      Math.random() * 900000
+  ).toString();
 }
 
-function hashOTP(otp) {
-  return crypto
-    .createHash("sha256")
-    .update(otp)
-    .digest("hex");
-}
-
-function normalizeEmail(email) {
-  return email.trim().toLowerCase();
-}
-
-function normalizePhone(phone) {
-  return phone.replace(/\s+/g, "");
-}
-
-function createOTPRecord(otp) {
-  return {
-    otpHash: hashOTP(otp),
-    expiresAt: Date.now() + OTP_EXPIRY,
-    attempts: 0,
-    lastSentAt: Date.now(),
-    verified: false,
-  };
-}
-
-
-// ===============================
-// SEND EMAIL OTP
-// ===============================
-
-router.post("/email/send", async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        message: "Email is required.",
-      });
-    }
-
-    const normalizedEmail =
-      normalizeEmail(email);
-
-    const key = `email:${normalizedEmail}`;
-
-    const existing = otpStore.get(key);
-
-    if (
-      existing &&
-      Date.now() - existing.lastSentAt <
-        RESEND_COOLDOWN
-    ) {
-      const remaining = Math.ceil(
-        (
-          RESEND_COOLDOWN -
-          (Date.now() - existing.lastSentAt)
-        ) / 1000
-      );
-
-      return res.status(429).json({
-        message:
-          `Please wait ${remaining} seconds before requesting another OTP.`,
-      });
-    }
-
-    const otp = generateOTP();
-
-    otpStore.set(
-      key,
-      createOTPRecord(otp)
-    );
-
-    await sendEmailOTP(
-      normalizedEmail,
-      otp
-    );
-
-    res.json({
-      success: true,
-      message:
-        "Email OTP sent successfully.",
-      expiresIn: 900,
-    });
-
-  } catch (error) {
-
-    console.error(
-      "Email OTP error:",
-      error
-    );
-
-    res.status(500).json({
-      message:
-        "Unable to send email OTP.",
-    });
-  }
-});
-
-
-// ===============================
-// VERIFY EMAIL OTP
-// ===============================
+/* =====================================================
+   SEND EMAIL OTP
+===================================================== */
 
 router.post(
-  "/email/verify",
-  (req, res) => {
-
-    const { email, otp } =
-      req.body;
-
-    if (!email || !otp) {
-      return res.status(400).json({
-        message:
-          "Email and OTP are required.",
-      });
-    }
-
-    const normalizedEmail =
-      normalizeEmail(email);
-
-    const key =
-      `email:${normalizedEmail}`;
-
-    const record =
-      otpStore.get(key);
-
-    if (!record) {
-      return res.status(400).json({
-        message:
-          "No OTP found. Please request a new OTP.",
-      });
-    }
-
-    if (Date.now() > record.expiresAt) {
-
-      otpStore.delete(key);
-
-      return res.status(400).json({
-        message:
-          "OTP expired. Please request a new OTP.",
-      });
-    }
-
-    if (
-      record.attempts >=
-      MAX_ATTEMPTS
-    ) {
-
-      otpStore.delete(key);
-
-      return res.status(400).json({
-        message:
-          "Too many attempts. Please request a new OTP.",
-      });
-    }
-
-    record.attempts++;
-
-    if (
-      hashOTP(otp) !==
-      record.otpHash
-    ) {
-
-      return res.status(400).json({
-        message: "Invalid OTP.",
-        attemptsRemaining:
-          MAX_ATTEMPTS -
-          record.attempts,
-      });
-    }
-
-    record.verified = true;
-
-    res.json({
-      success: true,
-      verified: true,
-      message:
-        "Email verified successfully.",
-    });
-  }
-);
-
-
-// ===============================
-// SEND PHONE OTP
-// ===============================
-
-router.post(
-  "/phone/send",
+  "/email/send",
   async (req, res) => {
-
     try {
+      const email =
+        String(req.body.email || "")
+          .trim()
+          .toLowerCase();
 
-      const { phone } =
-        req.body;
-
-      if (!phone) {
+      if (!email) {
         return res.status(400).json({
-          message:
-            "Phone number is required.",
+          success: false,
+          message: "Email is required.",
         });
       }
 
-      const normalizedPhone =
-        normalizePhone(phone);
+      /*
+       * Registration and forgot-password both
+       * use email OTP.
+       *
+       * We only check whether the email exists
+       * when the OTP is being used for password
+       * reset. If your route needs to distinguish
+       * registration from reset, pass purpose.
+       */
 
-      const key =
-        `phone:${normalizedPhone}`;
+      const purpose =
+        req.body.purpose || "registration";
+
+      if (purpose === "reset-password") {
+        try {
+          await adminAuth.getUserByEmail(
+            email
+          );
+        } catch (error) {
+          if (
+            error.code ===
+            "auth/user-not-found"
+          ) {
+            return res.status(404).json({
+              success: false,
+              message:
+                "No account exists with this email.",
+            });
+          }
+
+          throw error;
+        }
+      }
 
       const existing =
-        otpStore.get(key);
+        otpStore.get(
+          `${purpose}:${email}`
+        );
 
       if (
         existing &&
         Date.now() -
-          existing.lastSentAt <
-          RESEND_COOLDOWN
+          existing.createdAt <
+          RESEND_COOLDOWN_MS
       ) {
-
-        const remaining =
-          Math.ceil(
-            (
-              RESEND_COOLDOWN -
-              (
-                Date.now() -
-                existing.lastSentAt
-              )
-            ) / 1000
-          );
-
         return res.status(429).json({
+          success: false,
           message:
-            `Please wait ${remaining} seconds before requesting another OTP.`,
+            "Please wait before requesting another OTP.",
         });
       }
 
@@ -258,118 +101,273 @@ router.post(
         generateOTP();
 
       otpStore.set(
-        key,
-        createOTPRecord(otp)
+        `${purpose}:${email}`,
+        {
+          otp,
+          email,
+          purpose,
+          createdAt: Date.now(),
+          expiresAt:
+            Date.now() +
+            OTP_EXPIRY_MS,
+          attempts: 0,
+          verified: false,
+        }
       );
 
-      await sendPhoneOTP(
-        normalizedPhone,
+      await sendEmailOTP(
+        email,
         otp
       );
 
-      res.json({
+      return res.status(200).json({
         success: true,
         message:
-          "Phone OTP sent successfully.",
-        expiresIn: 900,
+          "Email OTP sent successfully.",
+        expiresInMinutes: 15,
       });
-
     } catch (error) {
-
       console.error(
-        "Phone OTP error:",
+        "Email OTP send error:",
         error
       );
 
-      res.status(500).json({
+      return res.status(500).json({
+        success: false,
         message:
-          "Unable to send phone OTP.",
+          error.message ||
+          "Unable to send email OTP.",
       });
     }
   }
 );
 
-
-// ===============================
-// VERIFY PHONE OTP
-// ===============================
+/* =====================================================
+   VERIFY EMAIL OTP
+===================================================== */
 
 router.post(
-  "/phone/verify",
-  (req, res) => {
+  "/email/verify",
+  async (req, res) => {
+    try {
+      const email =
+        String(req.body.email || "")
+          .trim()
+          .toLowerCase();
 
-    const { phone, otp } =
-      req.body;
+      const otp =
+        String(req.body.otp || "")
+          .trim();
 
-    if (!phone || !otp) {
-      return res.status(400).json({
+      const purpose =
+        req.body.purpose ||
+        "registration";
+
+      if (!email || !otp) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Email and OTP are required.",
+        });
+      }
+
+      const key =
+        `${purpose}:${email}`;
+
+      const record =
+        otpStore.get(key);
+
+      if (!record) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "OTP not found. Please request a new OTP.",
+        });
+      }
+
+      if (
+        Date.now() >
+        record.expiresAt
+      ) {
+        otpStore.delete(key);
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "OTP has expired. Please request a new OTP.",
+        });
+      }
+
+      if (
+        record.attempts >=
+        MAX_ATTEMPTS
+      ) {
+        otpStore.delete(key);
+
+        return res.status(429).json({
+          success: false,
+          message:
+            "Too many incorrect attempts. Please request a new OTP.",
+        });
+      }
+
+      if (
+        record.otp !== otp
+      ) {
+        record.attempts += 1;
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid OTP.",
+        });
+      }
+
+      record.verified = true;
+
+      otpStore.set(
+        key,
+        record
+      );
+
+      return res.status(200).json({
+        success: true,
+        verified: true,
         message:
-          "Phone and OTP are required.",
+          "Email verified successfully.",
+      });
+    } catch (error) {
+      console.error(
+        "Email OTP verification error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Unable to verify email OTP.",
       });
     }
+  }
+);
 
-    const normalizedPhone =
-      normalizePhone(phone);
+/* =====================================================
+   RESET PASSWORD
+===================================================== */
 
-    const key =
-      `phone:${normalizedPhone}`;
+router.post(
+  "/email/reset-password",
+  async (req, res) => {
+    try {
+      const email =
+        String(req.body.email || "")
+          .trim()
+          .toLowerCase();
 
-    const record =
-      otpStore.get(key);
+      const newPassword =
+        String(
+          req.body.newPassword || ""
+        );
 
-    if (!record) {
-      return res.status(400).json({
-        message:
-          "No OTP found. Please request a new OTP.",
-      });
-    }
+      if (
+        !email ||
+        !newPassword
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Email and new password are required.",
+        });
+      }
 
-    if (Date.now() > record.expiresAt) {
+      if (
+        newPassword.length < 6
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Password must contain at least 6 characters.",
+        });
+      }
+
+      const key =
+        `reset-password:${email}`;
+
+      const record =
+        otpStore.get(key);
+
+      if (!record) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Please verify the email OTP first.",
+        });
+      }
+
+      if (
+        Date.now() >
+        record.expiresAt
+      ) {
+        otpStore.delete(key);
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "OTP verification has expired. Please start again.",
+        });
+      }
+
+      if (!record.verified) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Please verify your email OTP first.",
+        });
+      }
+
+      const user =
+        await adminAuth.getUserByEmail(
+          email
+        );
+
+      await adminAuth.updateUser(
+        user.uid,
+        {
+          password:
+            newPassword,
+        }
+      );
 
       otpStore.delete(key);
 
-      return res.status(400).json({
+      return res.status(200).json({
+        success: true,
         message:
-          "OTP expired. Please request a new OTP.",
+          "Password reset successfully.",
       });
-    }
+    } catch (error) {
+      console.error(
+        "Password reset error:",
+        error
+      );
 
-    if (
-      record.attempts >=
-      MAX_ATTEMPTS
-    ) {
+      if (
+        error.code ===
+        "auth/user-not-found"
+      ) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "No account exists with this email.",
+        });
+      }
 
-      otpStore.delete(key);
-
-      return res.status(400).json({
+      return res.status(500).json({
+        success: false,
         message:
-          "Too many attempts. Please request a new OTP.",
+          "Unable to reset password.",
       });
     }
-
-    record.attempts++;
-
-    if (
-      hashOTP(otp) !==
-      record.otpHash
-    ) {
-
-      return res.status(400).json({
-        message: "Invalid OTP.",
-        attemptsRemaining:
-          MAX_ATTEMPTS -
-          record.attempts,
-      });
-    }
-
-    record.verified = true;
-
-    res.json({
-      success: true,
-      verified: true,
-      message:
-        "Phone verified successfully.",
-    });
   }
 );
 

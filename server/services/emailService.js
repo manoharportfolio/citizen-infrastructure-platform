@@ -3,70 +3,79 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+const EMAILJS_URL =
+  "https://api.emailjs.com/api/v1.0/email/send";
+
 export async function sendEmailOTP(email, otp) {
+  const serviceId =
+    process.env.EMAILJS_SERVICE_ID;
 
-  console.log("Email OTP request:");
-  console.log("Email:", email);
-  console.log("Service:", process.env.EMAILJS_SERVICE_ID);
-  console.log("Template:", process.env.EMAILJS_TEMPLATE_ID);
-  console.log(
-    "Public Key exists:",
-    !!process.env.EMAILJS_PUBLIC_KEY
-  );
-  console.log(
-    "Private Key exists:",
-    !!process.env.EMAILJS_PRIVATE_KEY
-  );
+  const templateId =
+    process.env.EMAILJS_TEMPLATE_ID;
 
-  const url =
-    "https://api.emailjs.com/api/v1.0/email/send";
+  const publicKey =
+    process.env.EMAILJS_PUBLIC_KEY;
 
-  const payload = {
-    service_id:
-      process.env.EMAILJS_SERVICE_ID,
+  const privateKey =
+    process.env.EMAILJS_PRIVATE_KEY;
 
-    template_id:
-      process.env.EMAILJS_TEMPLATE_ID,
-
-    user_id:
-      process.env.EMAILJS_PUBLIC_KEY,
-
-    accessToken:
-      process.env.EMAILJS_PRIVATE_KEY,
-
-    template_params: {
-      to_email: email,
-      otp: otp,
-      expiry_minutes: 15,
-    },
-  };
+  if (
+    !serviceId ||
+    !templateId ||
+    !publicKey ||
+    !privateKey
+  ) {
+    throw new Error(
+      "EmailJS configuration is missing. Check server/.env."
+    );
+  }
 
   try {
-
     const response = await axios.post(
-      url,
-      payload
-    );
+      EMAILJS_URL,
+      {
+        service_id: serviceId,
+        template_id: templateId,
+        user_id: publicKey,
+        accessToken: privateKey,
 
-    console.log(
-      "EmailJS response:",
-      response.data
+        template_params: {
+          to_email: email,
+          otp,
+          expiry_minutes: 15,
+        },
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+        timeout: 15000,
+      }
     );
 
     return response.data;
-
   } catch (error) {
+    const status =
+      error.response?.status;
+
+    const message =
+      error.response?.data ||
+      error.message;
 
     console.error(
-      "EMAILJS ERROR STATUS:",
-      error.response?.status
+      "EmailJS error:",
+      status,
+      message
     );
 
-    console.error(
-      "EMAILJS ERROR DATA:",
-      error.response?.data
-    );
+    if (status === 403) {
+      throw new Error(
+        "Email service rejected the server request. Enable server-side API access in EmailJS Account → Security."
+      );
+    }
 
-    throw error;
+    throw new Error(
+      "Unable to send email OTP. Please try again."
+    );
   }
 }

@@ -3,9 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   addDoc,
   collection,
-  doc,
   serverTimestamp,
-  updateDoc,
 } from "firebase/firestore";
 
 import { auth, db } from "../firebase/config";
@@ -16,19 +14,53 @@ function ReportNow() {
   const navigate = useNavigate();
 
   const videoRef = useRef(null);
+
+  // Current active camera stream
   const streamRef = useRef(null);
+
+  // Used to invalidate old camera requests
+  const cameraRequestRef = useRef(0);
+
+  // Used to know whether component is still mounted
+  const mountedRef = useRef(false);
+
+  // ==================================================
+  // LOCATION
+  // ==================================================
 
   const [location, setLocation] = useState(null);
   const [locationError, setLocationError] = useState("");
+  const [locationLoading, setLocationLoading] =
+    useState(false);
 
-  const [cameraActive, setCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState("");
+  // ==================================================
+  // CAMERA
+  // ==================================================
+
+  const [cameraActive, setCameraActive] =
+    useState(false);
+
+  const [cameraError, setCameraError] =
+    useState("");
+
+  // ==================================================
+  // PHOTO
+  // ==================================================
 
   const [photo, setPhoto] = useState(null);
   const [imageUrl, setImageUrl] = useState("");
 
+  // ==================================================
+  // COMPLAINT
+  // ==================================================
+
   const [category, setCategory] = useState("");
-  const [description, setDescription] = useState("");
+  const [description, setDescription] =
+    useState("");
+
+  // ==================================================
+  // AI
+  // ==================================================
 
   const [imageUploading, setImageUploading] =
     useState(false);
@@ -42,10 +74,12 @@ function ReportNow() {
   const [aiVerification, setAiVerification] =
     useState(null);
 
+  // ==================================================
+  // SUBMISSION
+  // ==================================================
+
   const [loading, setLoading] = useState(false);
-
   const [success, setSuccess] = useState(false);
-
   const [error, setError] = useState("");
 
   // ==================================================
@@ -54,25 +88,122 @@ function ReportNow() {
 
   const getLocation = () => {
     setLocationError("");
-    setLocation(null);
+    setLocationLoading(true);
 
     if (!navigator.geolocation) {
+      setLocationLoading(false);
+
       setLocationError(
         "Geolocation is not supported by this browser."
       );
+
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
+        const latitude =
+          position.coords.latitude;
+
+        const longitude =
+          position.coords.longitude;
+
+        const accuracy =
+          position.coords.accuracy;
+
         setLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
+          latitude,
+          longitude,
+          accuracy,
+          area: "",
+          city: "",
+          district: "",
+          state: "",
         });
+
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              "Unable to identify location."
+            );
+          }
+
+          const data =
+            await response.json();
+
+          const address =
+            data.address || {};
+
+          const area =
+            address.suburb ||
+            address.neighbourhood ||
+            address.quarter ||
+            address.village ||
+            "";
+
+          const city =
+            address.city ||
+            address.town ||
+            address.municipality ||
+            address.village ||
+            "";
+
+          const district =
+            address.state_district ||
+            address.district ||
+            address.county ||
+            "";
+
+          const state =
+            address.state || "";
+
+          setLocation({
+            latitude,
+            longitude,
+            accuracy,
+            area,
+            city,
+            district,
+            state,
+          });
+
+          setLocationError("");
+          setLocationLoading(false);
+        } catch (err) {
+          console.error(
+            "Reverse geocoding error:",
+            err
+          );
+
+          setLocation({
+            latitude,
+            longitude,
+            accuracy,
+            area: "",
+            city: "",
+            district: "",
+            state: "",
+          });
+
+          setLocationError(
+            "GPS location was captured, but area details could not be identified."
+          );
+
+          setLocationLoading(false);
+        }
       },
+
       (err) => {
-        console.error("Location error:", err);
+        console.error(
+          "Location error:",
+          err
+        );
+
+        setLocationLoading(false);
 
         if (err.code === 1) {
           setLocationError(
@@ -80,7 +211,7 @@ function ReportNow() {
           );
         } else if (err.code === 2) {
           setLocationError(
-            "Your location could not be determined."
+            "Your current location could not be determined."
           );
         } else if (err.code === 3) {
           setLocationError(
@@ -88,60 +219,158 @@ function ReportNow() {
           );
         } else {
           setLocationError(
-            "Unable to get your location."
+            "Unable to get your current location."
           );
         }
       },
+
       {
         enableHighAccuracy: true,
-        timeout: 15000,
+        timeout: 20000,
         maximumAge: 0,
       }
     );
   };
 
   // ==================================================
-  // CAMERA
+  // STOP CAMERA
+  // ==================================================
+
+  const stopCamera = () => {
+    console.log("STOP CAMERA");
+
+    // Invalidate every previous camera request.
+    cameraRequestRef.current += 1;
+
+    const stream = streamRef.current;
+
+    if (stream) {
+      stream.getTracks().forEach((track) => {
+        console.log(
+          "Stopping:",
+          track.kind,
+          track.readyState
+        );
+
+        track.stop();
+      });
+
+      streamRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
+
+    if (mountedRef.current) {
+      setCameraActive(false);
+    }
+  };
+
+  // ==================================================
+  // START CAMERA
   // ==================================================
 
   const startCamera = async () => {
     try {
       setCameraError("");
 
-      if (!navigator.mediaDevices?.getUserMedia) {
+      if (
+        !navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia
+      ) {
         setCameraError(
           "Camera is not supported by this browser."
         );
+
         return;
       }
 
+      // Stop any previous stream first.
+      stopCamera();
+
+      // Create a new unique request.
+      const requestId =
+        ++cameraRequestRef.current;
+
+      console.log(
+        "START CAMERA REQUEST:",
+        requestId
+      );
+
       const stream =
-        await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: false,
-        });
+        await navigator.mediaDevices.getUserMedia(
+          {
+            video: {
+              facingMode: {
+                ideal: "environment",
+              },
+            },
+            audio: false,
+          }
+        );
+
+      console.log(
+        "CAMERA STREAM RECEIVED:",
+        requestId
+      );
+
+      // ==================================================
+      // VERY IMPORTANT
+      //
+      // If the user left the page while getUserMedia()
+      // was waiting, immediately kill this stream.
+      // ==================================================
+
+      if (
+        !mountedRef.current ||
+        requestId !== cameraRequestRef.current ||
+        document.hidden
+      ) {
+        console.log(
+          "Old/invalid camera stream. Stopping it."
+        );
+
+        stream
+          .getTracks()
+          .forEach((track) => {
+            track.stop();
+          });
+
+        return;
+      }
 
       streamRef.current = stream;
 
       setCameraActive(true);
 
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      }, 100);
     } catch (err) {
-      console.error("Camera error:", err);
+      console.error(
+        "Camera error:",
+        err
+      );
 
       if (
         err.name === "NotAllowedError" ||
-        err.name === "PermissionDeniedError"
+        err.name ===
+          "PermissionDeniedError"
       ) {
         setCameraError(
           "Camera permission was denied. Please allow camera access."
         );
-      } else if (err.name === "NotFoundError") {
-        setCameraError("No camera was found.");
+      } else if (
+        err.name === "NotFoundError"
+      ) {
+        setCameraError(
+          "No camera was found on this device."
+        );
+      } else if (
+        err.name === "NotReadableError"
+      ) {
+        setCameraError(
+          "The camera is already being used by another application."
+        );
       } else {
         setCameraError(
           "Unable to access the camera."
@@ -150,124 +379,265 @@ function ReportNow() {
     }
   };
 
-  const stopCamera = () => {
-    if (streamRef.current) {
+  // ==================================================
+  // ATTACH STREAM TO VIDEO
+  // ==================================================
+
+  useEffect(() => {
+    if (
+      cameraActive &&
+      videoRef.current &&
       streamRef.current
-        .getTracks()
-        .forEach((track) => track.stop());
+    ) {
+      videoRef.current.srcObject =
+        streamRef.current;
 
-      streamRef.current = null;
+      videoRef.current
+        .play()
+        .catch((err) => {
+          console.log(
+            "Video play:",
+            err
+          );
+        });
     }
-
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-
-    setCameraActive(false);
-  };
+  }, [cameraActive]);
 
   // ==================================================
-  // UPLOAD IMAGE + AI IMAGE ANALYSIS
+  // CAMERA LIFECYCLE
   // ==================================================
 
-  const processCapturedPhoto = async (
-    imageData
-  ) => {
-    try {
-      setError("");
-      setImageUploading(true);
-      setAiImageAnalysis(null);
-      setAiVerification(null);
-      setImageUrl("");
+  useEffect(() => {
+    mountedRef.current = true;
 
-      const response = await fetch(imageData);
+    // Start initial camera
+    startCamera();
 
-      const blob = await response.blob();
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log(
+          "TAB HIDDEN → STOP CAMERA"
+        );
 
-      const imageFile = new File(
-        [blob],
-        "citizen-evidence.jpg",
-        {
-          type: "image/jpeg",
-        }
+        stopCamera();
+      }
+    };
+
+    const handlePageHide = () => {
+      console.log(
+        "PAGE HIDDEN → STOP CAMERA"
       );
 
-      // ----------------------------------------------
-      // Upload to ImageKit
-      // ----------------------------------------------
+      stopCamera();
+    };
 
-      const uploadedImage = await uploadImage(
-        imageFile,
-        `/citizen-reports/${auth.currentUser?.uid || "unknown"}/temporary`
+    const handleBlur = () => {
+      console.log(
+        "WINDOW BLURRED → STOP CAMERA"
       );
 
-      setImageUrl(uploadedImage.url);
+      stopCamera();
+    };
 
-      setImageUploading(false);
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
 
-      // ----------------------------------------------
-      // AI IMAGE-ONLY ANALYSIS
-      // ----------------------------------------------
+    window.addEventListener(
+      "pagehide",
+      handlePageHide
+    );
 
-      setAiChecking(true);
+    window.addEventListener(
+      "blur",
+      handleBlur
+    );
 
-      const result = await analyzeComplaint({
-        imageUrl: uploadedImage.url,
-        category: "",
-        description: "",
-        mode: "image-only",
-      });
-
-      setAiImageAnalysis(
-        result.imageAssessment || null
+    return () => {
+      console.log(
+        "REPORT NOW UNMOUNT → STOP CAMERA"
       );
 
-      setAiChecking(false);
+      mountedRef.current = false;
 
-      // If fields already exist, perform full check
-      if (
-        category.trim() &&
-        description.trim()
-      ) {
-        await runFullAICheck(
-          uploadedImage.url,
-          category,
-          description
+      // Invalidate pending getUserMedia()
+      cameraRequestRef.current += 1;
+
+      // Stop current stream
+      const stream =
+        streamRef.current;
+
+      if (stream) {
+        stream.getTracks().forEach(
+          (track) => {
+            track.stop();
+          }
+        );
+
+        streamRef.current = null;
+      }
+
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.srcObject = null;
+      }
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+
+      window.removeEventListener(
+        "pagehide",
+        handlePageHide
+      );
+
+      window.removeEventListener(
+        "blur",
+        handleBlur
+      );
+    };
+  }, []);
+
+  // ==================================================
+  // PROCESS PHOTO
+  // ==================================================
+
+  const processCapturedPhoto =
+    async (imageData) => {
+      try {
+        setError("");
+
+        setImageUploading(true);
+
+        setAiImageAnalysis(null);
+        setAiVerification(null);
+        setImageUrl("");
+
+        const response =
+          await fetch(imageData);
+
+        const blob =
+          await response.blob();
+
+        const imageFile = new File(
+          [blob],
+          "citizen-evidence.jpg",
+          {
+            type: "image/jpeg",
+          }
+        );
+
+        const uploadedImage =
+          await uploadImage(
+            imageFile,
+            `/citizen-reports/${
+              auth.currentUser?.uid ||
+              "unknown"
+            }/temporary`
+          );
+
+        setImageUrl(
+          uploadedImage.url
+        );
+
+        setImageUploading(false);
+
+        // Image-only AI analysis
+        setAiChecking(true);
+
+        const result =
+          await analyzeComplaint({
+            imageUrl:
+              uploadedImage.url,
+            category: "",
+            description: "",
+            mode: "image-only",
+          });
+
+        setAiImageAnalysis(
+          result.imageAssessment ||
+            null
+        );
+
+        setAiChecking(false);
+
+      } catch (err) {
+        console.error(
+          "Photo processing error:",
+          err
+        );
+
+        setImageUploading(false);
+        setAiChecking(false);
+
+        setError(
+          err.message ||
+            "Failed to process the evidence image."
         );
       }
-    } catch (err) {
-      console.error(
-        "Photo processing error:",
-        err
-      );
-
-      setImageUploading(false);
-      setAiChecking(false);
-
-      setError(
-        err.message ||
-          "Failed to process the evidence image."
-      );
-    }
-  };
+    };
 
   // ==================================================
   // CAPTURE PHOTO
   // ==================================================
 
   const capturePhoto = async () => {
-    if (!videoRef.current) {
+    const video =
+      videoRef.current;
+
+    if (!video) {
+      setCameraError(
+        "Camera is not ready."
+      );
+
       return;
     }
 
-    const video = videoRef.current;
+    if (
+      video.readyState <
+      HTMLMediaElement.HAVE_CURRENT_DATA
+    ) {
+      setCameraError(
+        "Camera is still starting. Please wait."
+      );
 
-    const canvas = document.createElement("canvas");
+      return;
+    }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    if (
+      video.videoWidth === 0 ||
+      video.videoHeight === 0
+    ) {
+      setCameraError(
+        "Camera image is not ready."
+      );
 
-    const context = canvas.getContext("2d");
+      return;
+    }
+
+    const canvas =
+      document.createElement(
+        "canvas"
+      );
+
+    canvas.width =
+      video.videoWidth;
+
+    canvas.height =
+      video.videoHeight;
+
+    const context =
+      canvas.getContext("2d");
+
+    if (!context) {
+      setCameraError(
+        "Unable to capture camera image."
+      );
+
+      return;
+    }
 
     context.drawImage(
       video,
@@ -277,264 +647,333 @@ function ReportNow() {
       canvas.height
     );
 
-    const imageData = canvas.toDataURL(
-      "image/jpeg",
-      0.85
-    );
+    const imageData =
+      canvas.toDataURL(
+        "image/jpeg",
+        0.85
+      );
 
     setPhoto(imageData);
 
+    // STOP CAMERA IMMEDIATELY
     stopCamera();
 
-    await processCapturedPhoto(imageData);
+    await processCapturedPhoto(
+      imageData
+    );
   };
 
   // ==================================================
   // RETAKE
   // ==================================================
 
-  const retakePhoto = async () => {
-    setPhoto(null);
-    setImageUrl("");
-    setAiImageAnalysis(null);
-    setAiVerification(null);
-    setError("");
+  const retakePhoto =
+    async () => {
+      stopCamera();
 
-    await startCamera();
-  };
+      setPhoto(null);
+      setImageUrl("");
 
-  // ==================================================
-  // FULL AI VERIFICATION
-  // ==================================================
-
-  const runFullAICheck = async (
-    currentImageUrl = imageUrl,
-    currentCategory = category,
-    currentDescription = description
-  ) => {
-    if (
-      !currentImageUrl ||
-      !currentCategory.trim() ||
-      !currentDescription.trim()
-    ) {
-      return;
-    }
-
-    try {
-      setError("");
-      setAiChecking(true);
+      setAiImageAnalysis(null);
       setAiVerification(null);
 
-      const result = await analyzeComplaint({
-        imageUrl: currentImageUrl,
-        category: currentCategory,
-        description: currentDescription,
-        mode: "full-check",
-      });
+      setError("");
+      setCameraError("");
 
-      setAiVerification(
-        result.consistency || null
-      );
-
-      setAiChecking(false);
-    } catch (err) {
-      console.error(
-        "AI verification error:",
-        err
-      );
-
-      setAiChecking(false);
-
-      setAiVerification({
-        approved: false,
-        score: 0,
-        categoryMatch: false,
-        descriptionMatch: false,
-        reason:
-          "AI verification could not be completed.",
-      });
-    }
-  };
+      await startCamera();
+    };
 
   // ==================================================
-  // INITIAL SETUP
+  // FULL AI CHECK
+  // ==================================================
+
+  const runFullAICheck =
+    async () => {
+      if (!imageUrl) {
+        setError(
+          "Please capture and analyze a photo first."
+        );
+
+        return;
+      }
+
+      if (!category.trim()) {
+        setError(
+          "Please select an issue category first."
+        );
+
+        return;
+      }
+
+      if (!description.trim()) {
+        setError(
+          "Please describe the issue first."
+        );
+
+        return;
+      }
+
+      try {
+        setError("");
+
+        setAiChecking(true);
+        setAiVerification(null);
+
+        const result =
+          await analyzeComplaint({
+            imageUrl,
+            category,
+            description,
+            mode: "full-check",
+          });
+
+        setAiVerification(
+          result.consistency ||
+            null
+        );
+
+        setAiChecking(false);
+
+      } catch (err) {
+        console.error(
+          "AI verification error:",
+          err
+        );
+
+        setAiChecking(false);
+
+        setAiVerification({
+          approved: false,
+          score: 0,
+          categoryMatch: false,
+          descriptionMatch: false,
+          reason:
+            "AI verification could not be completed.",
+        });
+
+        setError(
+          err.message ||
+            "AI verification failed."
+        );
+      }
+    };
+
+  // ==================================================
+  // LOCATION ON LOAD
   // ==================================================
 
   useEffect(() => {
     getLocation();
-    startCamera();
-
-    return () => {
-      stopCamera();
-    };
   }, []);
 
   // ==================================================
-  // AUTOMATIC FINAL AI CHECK
+  // INVALIDATE AI VERIFICATION
   // ==================================================
 
   useEffect(() => {
-    if (
-      !imageUrl ||
-      !category.trim() ||
-      !description.trim()
-    ) {
+    if (aiVerification) {
       setAiVerification(null);
-      return;
     }
-
-    const timer = setTimeout(() => {
-      runFullAICheck(
-        imageUrl,
-        category,
-        description
-      );
-    }, 1200);
-
-    return () => clearTimeout(timer);
-  }, [category, description, imageUrl]);
+  }, [
+    category,
+    description,
+  ]);
 
   // ==================================================
   // SUBMIT
   // ==================================================
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit =
+    async (e) => {
+      e.preventDefault();
 
-    setError("");
+      setError("");
 
-    if (!auth.currentUser) {
-      setError(
-        "You must be logged in to submit a report."
-      );
-      return;
-    }
+      if (!auth.currentUser) {
+        setError(
+          "You must be logged in to submit a report."
+        );
+        return;
+      }
 
-    if (!location) {
-      setError(
-        "Current location is required."
-      );
-      return;
-    }
+      if (!location) {
+        setError(
+          "Current location is required."
+        );
+        return;
+      }
 
-    if (!category) {
-      setError(
-        "Please select an issue category."
-      );
-      return;
-    }
+      if (!category) {
+        setError(
+          "Please select an issue category."
+        );
+        return;
+      }
 
-    if (!description.trim()) {
-      setError(
-        "Please describe the issue."
-      );
-      return;
-    }
+      if (!description.trim()) {
+        setError(
+          "Please describe the issue."
+        );
+        return;
+      }
 
-    if (!photo || !imageUrl) {
-      setError(
-        "Please capture a photo of the issue."
-      );
-      return;
-    }
+      if (!photo || !imageUrl) {
+        setError(
+          "Please capture and analyze a photo."
+        );
+        return;
+      }
 
-    if (imageUploading || aiChecking) {
-      setError(
-        "Please wait for the AI evidence check to finish."
-      );
-      return;
-    }
+      if (
+        imageUploading ||
+        aiChecking
+      ) {
+        setError(
+          "Please wait for the AI check to finish."
+        );
+        return;
+      }
 
-    if (
-      !aiVerification ||
-      !aiVerification.approved
-    ) {
-      setError(
-        "The AI consistency check has not passed. Please review your photo, category, and description."
-      );
-      return;
-    }
+      if (
+        !aiVerification ||
+        !aiVerification.approved
+      ) {
+        setError(
+          "Please complete the AI complaint verification before submitting."
+        );
+        return;
+      }
 
-    try {
-      setLoading(true);
+      if (
+        !aiVerification.categoryMatch ||
+        !aiVerification.descriptionMatch
+      ) {
+        setError(
+          "The photo does not sufficiently match the submitted details."
+        );
+        return;
+      }
 
-      const reportData = {
-        userId: auth.currentUser.uid,
+      try {
+        setLoading(true);
 
-        reportType: "report-now",
+        const reportData = {
+          userId:
+            auth.currentUser.uid,
 
-        category,
+          reportType:
+            "report-now",
 
-        description: description.trim(),
+          category,
 
-        location: {
-          latitude: location.latitude,
-          longitude: location.longitude,
-          accuracy: location.accuracy,
-        },
+          description:
+            description.trim(),
 
-        evidence: {
-          hasImage: true,
-          imageUrl,
-          fileName: "citizen-evidence.jpg",
-          fileType: "image/jpeg",
-        },
+          location: {
+            latitude:
+              location.latitude,
 
-        aiAnalysis: {
-          checked: true,
+            longitude:
+              location.longitude,
 
-          imageDetectedIssue:
-            aiImageAnalysis?.detectedIssue ||
-            null,
+            accuracy:
+              location.accuracy,
 
-          visualConfidence:
-            aiImageAnalysis?.confidence ||
-            null,
+            area:
+              location.area || "",
 
-          categoryMatch:
-            aiVerification.categoryMatch ||
-            false,
+            city:
+              location.city || "",
 
-          descriptionMatch:
-            aiVerification.descriptionMatch ||
-            false,
+            district:
+              location.district || "",
 
-          consistencyScore:
-            aiVerification.score || 0,
+            state:
+              location.state || "",
+          },
 
-          result: "passed",
-        },
+          evidence: {
+            hasImage: true,
 
-        status: "reported",
+            imageUrl,
 
-        createdAt: serverTimestamp(),
-      };
+            fileName:
+              "citizen-evidence.jpg",
 
-      const reportRef = await addDoc(
-        collection(db, "reports"),
-        reportData
-      );
+            fileType:
+              "image/jpeg",
+          },
 
-      console.log(
-        "Report submitted:",
-        reportRef.id
-      );
+          aiAnalysis: {
+            checked: true,
 
-      setSuccess(true);
-    } catch (err) {
-      console.error(
-        "Report submission error:",
-        err
-      );
+            imageDetectedIssue:
+              aiImageAnalysis
+                ?.detectedIssue ||
+              null,
 
-      setError(
-        err.message ||
-          "Failed to submit the report."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+            visualConfidence:
+              aiImageAnalysis
+                ?.confidence ??
+              null,
+
+            categoryMatch:
+              aiVerification
+                .categoryMatch ??
+              false,
+
+            descriptionMatch:
+              aiVerification
+                .descriptionMatch ??
+              false,
+
+            consistencyScore:
+              aiVerification
+                .score ??
+              0,
+
+            reason:
+              aiVerification.reason ||
+              "",
+
+            result:
+              "passed",
+          },
+
+          status:
+            "reported",
+
+          createdAt:
+            serverTimestamp(),
+        };
+
+        await addDoc(
+          collection(
+            db,
+            "reports"
+          ),
+          reportData
+        );
+
+        // Stop camera just in case
+        stopCamera();
+
+        setSuccess(true);
+
+      } catch (err) {
+        console.error(
+          "Report submission error:",
+          err
+        );
+
+        setError(
+          err.message ||
+            "Failed to submit the report."
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
 
   // ==================================================
   // SUCCESS
@@ -543,14 +982,20 @@ function ReportNow() {
   if (success) {
     return (
       <div className="container py-5">
+
         <div className="row justify-content-center">
+
           <div className="col-md-7">
+
             <div className="card shadow-sm border-0">
+
               <div className="card-body text-center p-5">
 
                 <div
                   className="mb-3"
-                  style={{ fontSize: "60px" }}
+                  style={{
+                    fontSize: "60px",
+                  }}
                 >
                   ✅
                 </div>
@@ -560,24 +1005,32 @@ function ReportNow() {
                 </h2>
 
                 <p className="text-muted">
-                  Your complaint passed the AI
-                  evidence consistency check and
-                  was successfully submitted.
+                  Your photo was analyzed and
+                  your complaint details passed
+                  the AI consistency check.
                 </p>
 
                 <button
                   className="btn btn-primary mt-3"
-                  onClick={() =>
-                    navigate("/citizen")
-                  }
+                  onClick={() => {
+                    stopCamera();
+
+                    navigate(
+                      "/citizen/dashboard"
+                    );
+                  }}
                 >
                   Back to Dashboard
                 </button>
 
               </div>
+
             </div>
+
           </div>
+
         </div>
+
       </div>
     );
   }
@@ -590,18 +1043,23 @@ function ReportNow() {
     <div className="container py-4">
 
       <div className="row justify-content-center">
+
         <div className="col-lg-8">
+
+          {/* BACK */}
 
           <button
             className="btn btn-link p-0 text-decoration-none mb-4"
-            onClick={() =>
-              navigate("/citizen")
-            }
+            onClick={() => {
+              stopCamera();
+              navigate(-1);
+            }}
           >
-            ← Back to Dashboard
+            ← Back
           </button>
 
           <div className="card shadow-sm border-0">
+
             <div className="card-body p-4">
 
               <h2 className="fw-bold mb-1">
@@ -609,66 +1067,374 @@ function ReportNow() {
               </h2>
 
               <p className="text-muted mb-4">
-                GPS and camera evidence will be
-                securely captured for this report.
+                Capture the issue now. AI will
+                first analyze the photo, then
+                verify your complaint details
+                against the evidence.
               </p>
 
-              {/* LOCATION */}
+              {/* ==================================================
+                  LOCATION
+              ================================================== */}
 
               <div className="card mb-4">
+
                 <div className="card-body">
 
-                  <h6 className="fw-bold">
+                  <h6 className="fw-bold mb-3">
                     📍 Location Details
                   </h6>
 
-                  {location ? (
-                    <div className="alert alert-light border mt-3 mb-0">
-                      ✓ Location captured
-                      <br />
-                      <small>
+                  {locationLoading ? (
+
+                    <div className="alert alert-info mb-0">
+
+                      <div className="d-flex align-items-center">
+
+                        <div
+                          className="spinner-border spinner-border-sm me-2"
+                          role="status"
+                        />
+
+                        Getting your current
+                        location...
+
+                      </div>
+
+                    </div>
+
+                  ) : location ? (
+
+                    <div className="border rounded p-3">
+
+                      <div className="mb-3">
+                        <small className="text-muted d-block">
+                          AREA
+                        </small>
+
+                        <strong>
+                          {location.area ||
+                            "Not available"}
+                        </strong>
+                      </div>
+
+                      <div className="mb-3">
+                        <small className="text-muted d-block">
+                          CITY
+                        </small>
+
+                        <strong>
+                          {location.city ||
+                            "Not available"}
+                        </strong>
+                      </div>
+
+                      <div className="mb-3">
+                        <small className="text-muted d-block">
+                          DISTRICT
+                        </small>
+
+                        <strong>
+                          {location.district ||
+                            "Not available"}
+                        </strong>
+                      </div>
+
+                      <div className="mb-3">
+                        <small className="text-muted d-block">
+                          STATE
+                        </small>
+
+                        <strong>
+                          {location.state ||
+                            "Not available"}
+                        </strong>
+                      </div>
+
+                      <hr />
+
+                      <small className="text-muted">
+                        GPS:{" "}
                         {location.latitude},{" "}
                         {location.longitude}
-                        {" "}
-                        (Accuracy:{" "}
+
+                        <br />
+
+                        Accuracy:{" "}
                         {Math.round(
                           location.accuracy
                         )}
-                        m)
+                        m
                       </small>
+
                     </div>
+
                   ) : (
-                    <div className="mt-3">
-                      <span className="text-muted">
-                        Getting your location...
-                      </span>
+
+                    <div>
+
+                      {locationError && (
+                        <div className="alert alert-danger">
+                          {locationError}
+                        </div>
+                      )}
 
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-primary ms-2"
-                        onClick={getLocation}
+                        className="btn btn-outline-primary"
+                        onClick={
+                          getLocation
+                        }
                       >
-                        Retry
+                        📍 Get Current Location
                       </button>
+
+                    </div>
+
+                  )}
+
+                  {location &&
+                    locationError && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary mt-3"
+                        onClick={
+                          getLocation
+                        }
+                      >
+                        🔄 Retry Location
+                      </button>
+                    )}
+
+                </div>
+
+              </div>
+
+              {/* ==================================================
+                  CAMERA
+              ================================================== */}
+
+              <div className="card mb-4">
+
+                <div className="card-body">
+
+                  <div className="d-flex justify-content-between align-items-center">
+
+                    <h6 className="fw-bold mb-0">
+                      📷 Capture Evidence
+                    </h6>
+
+                    <span className="badge text-bg-warning">
+                      Required
+                    </span>
+
+                  </div>
+
+                  <p className="text-muted small mt-2">
+                    Take a fresh photo of the issue.
+                    AI will analyze the image
+                    immediately after capture.
+                  </p>
+
+                  {!photo &&
+                    !cameraActive && (
+                      <button
+                        type="button"
+                        className="btn btn-outline-primary w-100 mt-3"
+                        onClick={
+                          startCamera
+                        }
+                      >
+                        📷 Open Camera
+                      </button>
+                    )}
+
+                  {cameraActive && (
+                    <div className="mt-3">
+
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-100 rounded border"
+                        style={{
+                          maxHeight:
+                            "400px",
+                          objectFit:
+                            "cover",
+                          background:
+                            "#000",
+                        }}
+                      />
+
+                      <button
+                        type="button"
+                        className="btn btn-primary w-100 mt-3"
+                        onClick={
+                          capturePhoto
+                        }
+                      >
+                        📸 Capture Photo
+                      </button>
+
                     </div>
                   )}
 
-                  {locationError && (
+                  {photo && (
+                    <div className="mt-3">
+
+                      <img
+                        src={photo}
+                        alt="Captured evidence"
+                        className="img-fluid rounded border w-100"
+                        style={{
+                          maxHeight:
+                            "400px",
+                          objectFit:
+                            "cover",
+                        }}
+                      />
+
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary w-100 mt-3"
+                        onClick={
+                          retakePhoto
+                        }
+                        disabled={
+                          imageUploading ||
+                          aiChecking
+                        }
+                      >
+                        🔄 Retake Photo
+                      </button>
+
+                    </div>
+                  )}
+
+                  {cameraError && (
                     <div className="alert alert-danger mt-3 mb-0">
-                      {locationError}
+                      {cameraError}
                     </div>
                   )}
 
                 </div>
+
               </div>
 
-              {/* FORM */}
+              {/* ==================================================
+                  AI IMAGE ANALYSIS
+              ================================================== */}
+
+              {(imageUploading ||
+                aiChecking ||
+                aiImageAnalysis) && (
+
+                <div className="card border-primary mb-4">
+
+                  <div className="card-body">
+
+                    <h6 className="fw-bold">
+                      🤖 AI Image Analysis
+                    </h6>
+
+                    {imageUploading && (
+                      <div className="alert alert-info mt-3 mb-0">
+
+                        <div className="d-flex align-items-center">
+
+                          <div
+                            className="spinner-border spinner-border-sm me-2"
+                            role="status"
+                          />
+
+                          Uploading evidence
+                          securely...
+
+                        </div>
+
+                      </div>
+                    )}
+
+                    {!imageUploading &&
+                      aiChecking &&
+                      !aiImageAnalysis && (
+                        <div className="alert alert-info mt-3 mb-0">
+
+                          <div className="d-flex align-items-center">
+
+                            <div
+                              className="spinner-border spinner-border-sm me-2"
+                              role="status"
+                            />
+
+                            <strong>
+                              AI is analyzing
+                              the photo...
+                            </strong>
+
+                          </div>
+
+                        </div>
+                      )}
+
+                    {aiImageAnalysis && (
+                      <div className="mt-3">
+
+                        <div className="alert alert-success">
+
+                          <h6 className="fw-bold mb-2">
+                            ✓ Photo Analysis
+                            Complete
+                          </h6>
+
+                          <div>
+                            <strong>
+                              Detected issue:
+                            </strong>{" "}
+                            {aiImageAnalysis
+                              .detectedIssue ||
+                              "Unable to determine"}
+                          </div>
+
+                          <div className="mt-1">
+                            <strong>
+                              Suggested category:
+                            </strong>{" "}
+                            {aiImageAnalysis
+                              .suggestedCategory ||
+                              "Other"}
+                          </div>
+
+                          <div className="mt-1">
+                            <strong>
+                              Visual confidence:
+                            </strong>{" "}
+                            {aiImageAnalysis
+                              .confidence ??
+                              0}
+                            %
+                          </div>
+
+                        </div>
+
+                      </div>
+                    )}
+
+                  </div>
+
+                </div>
+              )}
+
+              {/* ==================================================
+                  ISSUE INFORMATION
+              ================================================== */}
 
               <form onSubmit={handleSubmit}>
 
-                {/* ISSUE */}
-
                 <div className="card mb-4">
+
                   <div className="card-body">
 
                     <h6 className="fw-bold mb-3">
@@ -731,7 +1497,7 @@ function ReportNow() {
 
                     </div>
 
-                    <div className="mb-2">
+                    <div className="mb-3">
 
                       <label className="form-label">
                         Description
@@ -756,262 +1522,133 @@ function ReportNow() {
 
                     </div>
 
-                  </div>
-                </div>
-
-                {/* EVIDENCE */}
-
-                <div className="card mb-4">
-                  <div className="card-body">
-
-                    <div className="d-flex justify-content-between">
-
-                      <h6 className="fw-bold">
-                        📷 Visual Evidence
-                      </h6>
-
-                      <span className="badge text-bg-warning">
-                        Required
-                      </span>
-
-                    </div>
-
-                    {!photo && !cameraActive && (
-                      <button
-                        type="button"
-                        className="btn btn-outline-primary w-100 mt-3"
-                        onClick={startCamera}
-                      >
-                        📷 Open Camera
-                      </button>
-                    )}
-
-                    {cameraActive && (
-                      <div className="mt-3">
-
-                        <video
-                          ref={videoRef}
-                          autoPlay
-                          playsInline
-                          muted
-                          className="w-100 rounded border"
-                          style={{
-                            maxHeight: "400px",
-                            objectFit: "cover",
-                          }}
-                        />
-
-                        <button
-                          type="button"
-                          className="btn btn-primary w-100 mt-3"
-                          onClick={capturePhoto}
-                        >
-                          📸 Capture Photo
-                        </button>
-
-                      </div>
-                    )}
-
-                    {photo && (
-                      <div className="mt-3">
-
-                        <img
-                          src={photo}
-                          alt="Captured evidence"
-                          className="img-fluid rounded border w-100"
-                          style={{
-                            maxHeight: "400px",
-                            objectFit: "cover",
-                          }}
-                        />
-
-                        <button
-                          type="button"
-                          className="btn btn-outline-secondary w-100 mt-3"
-                          onClick={retakePhoto}
-                        >
-                          🔄 Retake Photo
-                        </button>
-
-                      </div>
-                    )}
-
-                    {cameraError && (
-                      <div className="alert alert-danger mt-3 mb-0">
-                        {cameraError}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary w-100"
+                      onClick={
+                        runFullAICheck
+                      }
+                      disabled={
+                        !imageUrl ||
+                        !category ||
+                        !description.trim() ||
+                        imageUploading ||
+                        aiChecking
+                      }
+                    >
+                      {aiChecking
+                        ? "🤖 Verifying Complaint..."
+                        : "🤖 Verify Complaint with AI"}
+                    </button>
 
                   </div>
+
                 </div>
 
-                {/* AI IMAGE CHECK */}
+                {/* ==================================================
+                    AI VERIFICATION
+                ================================================== */}
 
-                {(imageUploading ||
-                  aiChecking ||
-                  aiImageAnalysis) && (
-                  <div className="card border-primary mb-4">
+                {aiVerification && (
+                  <div className="card mb-4">
+
                     <div className="card-body">
 
                       <h6 className="fw-bold">
-                        🤖 AI Evidence Analysis
+                        🤖 AI Complaint Verification
                       </h6>
 
-                      {imageUploading && (
-                        <div className="alert alert-info mt-3 mb-0">
-                          Uploading evidence securely...
-                        </div>
-                      )}
+                      {aiVerification.approved ? (
 
-                      {!imageUploading &&
-                        aiChecking &&
-                        !aiVerification && (
-                          <div className="alert alert-info mt-3 mb-0">
-                            🤖 AI is analyzing the
-                            evidence...
-                          </div>
-                        )}
+                        <div className="alert alert-success mt-3 mb-0">
 
-                      {aiImageAnalysis && (
-                        <div className="mt-3">
+                          <h6 className="fw-bold">
+                            ✓ Information appears
+                            consistent
+                          </h6>
 
-                          <div className="alert alert-success mb-2">
-                            ✓ Image analyzed
+                          <div>
+                            Category match:{" "}
+                            {aiVerification.categoryMatch
+                              ? "✓"
+                              : "✗"}
                           </div>
 
                           <div>
-                            <strong>
-                              Detected issue:
-                            </strong>{" "}
-                            {aiImageAnalysis.detectedIssue ||
-                              "Unable to determine"}
+                            Description match:{" "}
+                            {aiVerification.descriptionMatch
+                              ? "✓"
+                              : "✗"}
                           </div>
 
-                          <div>
+                          <div className="mt-2">
+                            Consistency score:{" "}
                             <strong>
-                              Visual confidence:
-                            </strong>{" "}
-                            {aiImageAnalysis.confidence ??
-                              0}
-                            %
+                              {aiVerification.score ??
+                                0}
+                              %
+                            </strong>
+                          </div>
+
+                          {aiVerification.reason && (
+                            <small className="d-block mt-2">
+                              {aiVerification.reason}
+                            </small>
+                          )}
+
+                        </div>
+
+                      ) : (
+
+                        <div className="alert alert-warning mt-3 mb-0">
+
+                          <h6 className="fw-bold">
+                            ⚠ Review Required
+                          </h6>
+
+                          {aiVerification.reason && (
+                            <div>
+                              <strong>
+                                AI reason:
+                              </strong>{" "}
+                              {aiVerification.reason}
+                            </div>
+                          )}
+
+                          <div className="mt-2">
+                            Consistency score:{" "}
+                            <strong>
+                              {aiVerification.score ??
+                                0}
+                              %
+                            </strong>
                           </div>
 
                         </div>
+
                       )}
 
                     </div>
+
                   </div>
                 )}
 
-                {/* FINAL AI CHECK */}
-
-                {imageUrl &&
-                  category &&
-                  description.trim() && (
-                    <div className="card mb-4">
-
-                      <div className="card-body">
-
-                        <h6 className="fw-bold">
-                          🤖 AI Complaint Verification
-                        </h6>
-
-                        {aiChecking ? (
-                          <div className="alert alert-info mt-3 mb-0">
-                            🤖 Checking photo against
-                            your category and
-                            description...
-                          </div>
-                        ) : aiVerification ? (
-                          <div className="mt-3">
-
-                            {aiVerification.approved ? (
-                              <div className="alert alert-success mb-0">
-
-                                <h6 className="fw-bold">
-                                  ✓ Information appears
-                                  consistent
-                                </h6>
-
-                                <div>
-                                  Category match:{" "}
-                                  {aiVerification.categoryMatch
-                                    ? "✓"
-                                    : "✗"}
-                                </div>
-
-                                <div>
-                                  Description match:{" "}
-                                  {aiVerification.descriptionMatch
-                                    ? "✓"
-                                    : "✗"}
-                                </div>
-
-                                <div className="mt-2">
-                                  Consistency score:{" "}
-                                  <strong>
-                                    {
-                                      aiVerification.score
-                                    }
-                                    %
-                                  </strong>
-                                </div>
-
-                                <small className="d-block mt-2">
-                                  {
-                                    aiVerification.reason
-                                  }
-                                </small>
-
-                              </div>
-                            ) : (
-                              <div className="alert alert-warning mb-0">
-
-                                <h6 className="fw-bold">
-                                  ⚠ Review Required
-                                </h6>
-
-                                <div>
-                                  {
-                                    aiVerification.reason
-                                  }
-                                </div>
-
-                                <div className="mt-2">
-                                  Consistency score:{" "}
-                                  <strong>
-                                    {
-                                      aiVerification.score
-                                    }
-                                    %
-                                  </strong>
-                                </div>
-
-                              </div>
-                            )}
-
-                          </div>
-                        ) : (
-                          <div className="alert alert-secondary mt-3 mb-0">
-                            AI verification will run
-                            automatically.
-                          </div>
-                        )}
-
-                      </div>
-                    </div>
-                  )}
-
-                {/* CONFIRMATION */}
+                {/* ==================================================
+                    INFO
+                ================================================== */}
 
                 <div className="alert alert-info">
+
                   <small>
-                    ℹ By submitting this report,
-                    you confirm that the information
-                    is accurate. AI checks whether the
-                    submitted information appears
+                    ℹ AI first analyzes the captured
+                    photo. After you provide the
+                    category and description, AI
+                    checks whether those details appear
                     consistent with the visual evidence.
+                    AI verification is not proof that
+                    the complaint is factually true.
                   </small>
+
                 </div>
 
                 {/* ERROR */}
@@ -1031,7 +1668,9 @@ function ReportNow() {
                     loading ||
                     imageUploading ||
                     aiChecking ||
-                    !aiVerification?.approved
+                    !aiVerification?.approved ||
+                    !aiVerification?.categoryMatch ||
+                    !aiVerification?.descriptionMatch
                   }
                 >
                   {loading
@@ -1040,18 +1679,23 @@ function ReportNow() {
                     ? "Uploading Evidence..."
                     : aiChecking
                     ? "AI Checking..."
+                    : !aiImageAnalysis
+                    ? "Analyze Photo First"
                     : !aiVerification?.approved
-                    ? "Complete AI Verification First"
+                    ? "Verify Complaint First"
                     : "✓ Confirm & Submit Report"}
                 </button>
 
               </form>
 
             </div>
+
           </div>
 
         </div>
+
       </div>
+
     </div>
   );
 }

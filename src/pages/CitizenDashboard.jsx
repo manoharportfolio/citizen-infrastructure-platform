@@ -353,33 +353,37 @@ function CitizenDashboard() {
       </div>
 
       <div className="card shadow-sm">
-        <div className="card-body">
-          <h4>My Profile</h4>
+  <div className="card-body">
 
-          <hr />
+    <h4>My Profile</h4>
 
-          <p>
-            <strong>Name:</strong>{" "}
-            {profile?.fullName || "Not available"}
-          </p>
+    <hr />
 
-          <p>
-            <strong>Email:</strong>{" "}
-            {profile?.email || user?.email}
-          </p>
+    <p>
+      <strong>Name:</strong>{" "}
+      {profile?.fullName ||
+  "Citizen"}
+    </p>
 
-          <p>
-            <strong>Phone:</strong>{" "}
-            {profile?.phoneNumber ||
-              "Not available"}
-          </p>
+    <p>
+      <strong>Email:</strong>{" "}
+      {profile?.email ||
+        "Not available"}
+    </p>
 
-          <p className="mb-0">
-            <strong>Account Type:</strong>{" "}
-            Citizen
-          </p>
-        </div>
-      </div>
+    <p>
+      <strong>Phone:</strong>{" "}
+      {profile?.phoneNumber ||
+        "Not available"}
+    </p>
+
+    <p className="mb-0">
+      <strong>Account Type:</strong>{" "}
+      Citizen
+    </p>
+
+  </div>
+</div>
     </div>
   );
 }

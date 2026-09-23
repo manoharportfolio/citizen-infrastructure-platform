@@ -2,9 +2,10 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 
-import otpRoutes from "./routes/otpRoutes.js";
+import reportRoutes from "./routes/reportRoutes.js";
 import imageRoutes from "./routes/imageRoutes.js";
 import aiRoutes from "./routes/aiRoutes.js";
+import otpRoutes from "./routes/otpRoutes.js";
 
 dotenv.config();
 
@@ -15,22 +16,46 @@ const PORT =
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: true,
+    credentials: true,
   })
 );
 
-app.use(express.json());
+app.use(
+  express.json({
+    limit: "10mb",
+  })
+);
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "10mb",
+  })
+);
 
 app.get("/", (req, res) => {
-  res.json({
+  res.status(200).json({
+    success: true,
     message:
-      "Citizen Infrastructure API is running.",
+      "CivicAI API is running.",
   });
 });
 
+app.get(
+  "/api/health",
+  (req, res) => {
+    res.status(200).json({
+      success: true,
+      message:
+        "CivicAI backend is healthy.",
+    });
+  }
+);
+
 app.use(
-  "/api/otp",
-  otpRoutes
+  "/api/reports",
+  reportRoutes
 );
 
 app.use(
@@ -43,8 +68,44 @@ app.use(
   aiRoutes
 );
 
-app.listen(PORT, () => {
-  console.log(
-    `Server running on http://localhost:${PORT}`
-  );
-});
+app.use(
+  "/api/otp",
+  otpRoutes
+);
+
+app.use(
+  (req, res) => {
+    res.status(404).json({
+      success: false,
+      message:
+        `Route not found: ${req.method} ${req.originalUrl}`,
+    });
+  }
+);
+
+app.use(
+  (error, req, res, next) => {
+    console.error(
+      "Server error:",
+      error
+    );
+
+    res.status(
+      error.status || 500
+    ).json({
+      success: false,
+      message:
+        error.message ||
+        "Internal server error.",
+    });
+  }
+);
+
+app.listen(
+  PORT,
+  () => {
+    console.log(
+      `Server running on http://localhost:${PORT}`
+    );
+  }
+);
