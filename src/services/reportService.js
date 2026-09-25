@@ -1,18 +1,21 @@
 import { auth } from "../firebase/config";
 
+
 const API_URL =
   import.meta.env.VITE_API_URL ||
   "http://localhost:5000";
 
 
-/* =========================================================
-   CREATE REPORT
-========================================================= */
+// ============================================================
+// CREATE REPORT
+// ============================================================
 
 export async function createReport(
   reportData
 ) {
-  const user = auth.currentUser;
+  const user =
+    auth.currentUser;
+
 
   if (!user) {
     throw new Error(
@@ -20,8 +23,17 @@ export async function createReport(
     );
   }
 
+
+  if (!reportData) {
+    throw new Error(
+      "Complaint data is required."
+    );
+  }
+
+
   const token =
     await user.getIdToken();
+
 
   const response =
     await fetch(
@@ -34,17 +46,28 @@ export async function createReport(
             "application/json",
 
           Authorization:
-            `Bearer ${token}`
+            `Bearer ${token}`,
         },
 
-        body: JSON.stringify(
-          reportData
-        )
+        body:
+          JSON.stringify(
+            reportData
+          ),
       }
     );
 
-  const data =
-    await response.json();
+
+  let data;
+
+  try {
+    data =
+      await response.json();
+  } catch {
+    throw new Error(
+      "The server returned an invalid response."
+    );
+  }
+
 
   if (!response.ok) {
     throw new Error(
@@ -53,17 +76,19 @@ export async function createReport(
     );
   }
 
+
   return data;
 }
 
 
-/* =========================================================
-   GET MY REPORTS
-========================================================= */
+// ============================================================
+// GET MY REPORTS
+// ============================================================
 
 export async function getMyReports() {
   const user =
     auth.currentUser;
+
 
   if (!user) {
     throw new Error(
@@ -71,8 +96,10 @@ export async function getMyReports() {
     );
   }
 
+
   const token =
     await user.getIdToken();
+
 
   const response =
     await fetch(
@@ -82,13 +109,23 @@ export async function getMyReports() {
 
         headers: {
           Authorization:
-            `Bearer ${token}`
-        }
+            `Bearer ${token}`,
+        },
       }
     );
 
-  const data =
-    await response.json();
+
+  let data;
+
+  try {
+    data =
+      await response.json();
+  } catch {
+    throw new Error(
+      "The server returned an invalid response."
+    );
+  }
+
 
   if (!response.ok) {
     throw new Error(
@@ -97,13 +134,14 @@ export async function getMyReports() {
     );
   }
 
+
   return data;
 }
 
 
-/* =========================================================
-   DELETE MY REPORT
-========================================================= */
+// ============================================================
+// DELETE REPORT
+// ============================================================
 
 export async function deleteReport(
   reportId
@@ -111,11 +149,13 @@ export async function deleteReport(
   const user =
     auth.currentUser;
 
+
   if (!user) {
     throw new Error(
       "You must be logged in to delete a complaint."
     );
   }
+
 
   if (!reportId) {
     throw new Error(
@@ -123,24 +163,38 @@ export async function deleteReport(
     );
   }
 
+
   const token =
     await user.getIdToken();
 
+
   const response =
     await fetch(
-      `${API_URL}/api/reports/${reportId}`,
+      `${API_URL}/api/reports/${encodeURIComponent(
+        reportId
+      )}`,
       {
         method: "DELETE",
 
         headers: {
           Authorization:
-            `Bearer ${token}`
-        }
+            `Bearer ${token}`,
+        },
       }
     );
 
-  const data =
-    await response.json();
+
+  let data;
+
+  try {
+    data =
+      await response.json();
+  } catch {
+    throw new Error(
+      "The server returned an invalid response."
+    );
+  }
+
 
   if (!response.ok) {
     throw new Error(
@@ -148,6 +202,7 @@ export async function deleteReport(
         "Unable to delete complaint."
     );
   }
+
 
   return data;
 }

@@ -1,15 +1,22 @@
-import { GoogleGenAI } from "@google/genai";
+import axios from "axios";
 import dotenv from "dotenv";
+import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-});
 
-const MODEL = process.env.GEMINI_MODEL;
+// ============================================================
+// CONFIGURATION
+// ============================================================
 
-const ALLOWED_CATEGORIES = [
+const GEMINI_API_KEY =
+  process.env.GEMINI_API_KEY;
+
+const GEMINI_MODEL =
+  process.env.GEMINI_MODEL ||
+  "gemini-2.5-flash";
+
+const CATEGORIES = [
   "Road Damage",
   "Garbage",
   "Footpath",
@@ -20,394 +27,570 @@ const ALLOWED_CATEGORIES = [
   "Other",
 ];
 
-function normalizeCategory(category) {
-  if (!category) {
-    return "Other";
-  }
 
-  const value = category.toLowerCase().trim();
-
-  // Road-related responses
-  if (
-    value.includes("road") ||
-    value.includes("pothole") ||
-    value.includes("roads & footpaths") ||
-    value.includes("road & footpath")
-  ) {
-    return "Road Damage";
-  }
-
-  // Footpath-related responses
-  if (
-    value.includes("footpath") ||
-    value.includes("sidewalk") ||
-    value.includes("pavement")
-  ) {
-    return "Footpath";
-  }
-
-  if (
-    value.includes("garbage") ||
-    value.includes("waste") ||
-    value.includes("trash") ||
-    value.includes("litter")
-  ) {
-    return "Garbage";
-  }
-
-  if (
-    value.includes("streetlight") ||
-    value.includes("street light") ||
-    value.includes("lamp")
-  ) {
-    return "Streetlight";
-  }
-
-  if (
-    value.includes("water") ||
-    value.includes("water supply") ||
-    value.includes("water shortage")
-  ) {
-    return "Water";
-  }
-
-  if (
-    value.includes("drain") ||
-    value.includes("drainage") ||
-    value.includes("sewage")
-  ) {
-    return "Drainage";
-  }
-
-  if (
-    value.includes("transport") ||
-    value.includes("bus") ||
-    value.includes("public transit")
-  ) {
-    return "Public Transport";
-  }
-
-  return "Other";
+if (!GEMINI_API_KEY) {
+  console.warn(
+    "Warning: GEMINI_API_KEY is not configured."
+  );
 }
 
-async function generateWithRetry(request, maxRetries = 2) {
-  let lastError;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await ai.models.generateContent(request);
-    } catch (error) {
-      lastError = error;
+const ai =
+  GEMINI_API_KEY
+    ? new GoogleGenAI({
+        apiKey:
+          GEMINI_API_KEY,
+      })
+    : null;
 
-      const status = error?.status || error?.code;
 
-      console.error(
-        `Gemini attempt ${attempt + 1} failed:`,
-        error?.message || error
+// ============================================================
+// HELPERS
+// ============================================================
+
+function cleanJsonText(
+  text
+) {
+  if (!text) {
+    return "";
+  }
+
+  let cleaned =
+    String(text).trim();
+
+
+  if (
+    cleaned.startsWith(
+      "```json"
+    )
+  ) {
+    cleaned =
+      cleaned.slice(7);
+  } else if (
+    cleaned.startsWith(
+      "```"
+    )
+  ) {
+    cleaned =
+      cleaned.slice(3);
+  }
+
+
+  if (
+    cleaned.endsWith(
+      "```"
+    )
+  ) {
+    cleaned =
+      cleaned.slice(
+        0,
+        -3
       );
+  }
 
-      if (status !== 503 && status !== 429) {
-        throw error;
-      }
 
-      if (attempt === maxRetries) {
-        break;
-      }
+  return cleaned.trim();
+}
 
-      const delay = 2000 * (attempt + 1);
 
-      console.log(`Retrying Gemini in ${delay}ms...`);
+function parseGeminiJson(
+  text
+) {
+  const cleaned =
+    cleanJsonText(text);
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, delay)
+
+  try {
+    return JSON.parse(
+      cleaned
+    );
+  } catch {
+    const start =
+      cleaned.indexOf("{");
+
+    const end =
+      cleaned.lastIndexOf("}");
+
+
+    if (
+      start !== -1 &&
+      end !== -1 &&
+      end > start
+    ) {
+      return JSON.parse(
+        cleaned.slice(
+          start,
+          end + 1
+        )
       );
     }
-  }
 
-  throw lastError;
+
+    throw new Error(
+      "Gemini returned an invalid JSON response."
+    );
+  }
 }
 
-export async function analyzeComplaint({
+
+function normalizeConfidence(
+  value
+) {
+  const number =
+    Number(value);
+
+
+  if (
+    Number.isNaN(number)
+  ) {
+    return 0;
+  }
+
+
+  if (number < 0) {
+    return 0;
+  }
+
+
+  if (number > 100) {
+    return 100;
+  }
+
+
+  return Math.round(
+    number
+  );
+}
+
+
+function normalizeScore(
+  value
+) {
+  const number =
+    Number(value);
+
+
+  if (
+    Number.isNaN(number)
+  ) {
+    return 0;
+  }
+
+
+  if (number < 0) {
+    return 0;
+  }
+
+
+  if (number > 100) {
+    return 100;
+  }
+
+
+  return Math.round(
+    number
+  );
+}
+
+
+function normalizeCategory(
+  value
+) {
+  const category =
+    String(
+      value || ""
+    ).trim();
+
+
+  const matched =
+    CATEGORIES.find(
+      (item) =>
+        item.toLowerCase() ===
+        category.toLowerCase()
+    );
+
+
+  return (
+    matched ||
+    "Other"
+  );
+}
+
+
+function normalizeObservations(
+  value
+) {
+  if (
+    !Array.isArray(value)
+  ) {
+    return [];
+  }
+
+
+  return value
+    .map(
+      (item) =>
+        String(item).trim()
+    )
+    .filter(Boolean)
+    .slice(0, 10);
+}
+
+
+// ============================================================
+// DOWNLOAD IMAGE
+// ============================================================
+
+async function downloadImage(
+  imageUrl
+) {
+  if (!imageUrl) {
+    throw new Error(
+      "Image URL is required."
+    );
+  }
+
+
+  const response =
+    await axios.get(
+      imageUrl,
+      {
+        responseType:
+          "arraybuffer",
+        timeout: 30000,
+      }
+    );
+
+
+  const contentType =
+    response.headers[
+      "content-type"
+    ] ||
+    "image/jpeg";
+
+
+  const mimeType =
+    contentType.split(
+      ";"
+    )[0];
+
+
+  return {
+    base64:
+      Buffer.from(
+        response.data
+      ).toString(
+        "base64"
+      ),
+    mimeType,
+  };
+}
+
+
+// ============================================================
+// GEMINI REQUEST
+// ============================================================
+
+async function generateGeminiResponse(
+  imageUrl,
+  prompt
+) {
+  if (!ai) {
+    throw new Error(
+      "Gemini AI is not configured. Add GEMINI_API_KEY to server/.env."
+    );
+  }
+
+
+  const image =
+    await downloadImage(
+      imageUrl
+    );
+
+
+  const response =
+    await ai.models.generateContent(
+      {
+        model:
+          GEMINI_MODEL,
+
+        contents: [
+          {
+            role:
+              "user",
+
+            parts: [
+              {
+                inlineData: {
+                  mimeType:
+                    image.mimeType,
+                  data:
+                    image.base64,
+                },
+              },
+
+              {
+                text:
+                  prompt,
+              },
+            ],
+          },
+        ],
+
+        config: {
+          temperature:
+            0.2,
+
+          responseMimeType:
+            "application/json",
+        },
+      }
+    );
+
+
+  return (
+    response.text ||
+    ""
+  );
+}
+
+
+// ============================================================
+// IMAGE-ONLY ANALYSIS
+// ============================================================
+
+async function analyzeImageOnly(
+  imageUrl
+) {
+  const prompt = `
+You are an AI visual inspection assistant for CivicAI, a citizen infrastructure reporting platform.
+
+Analyze ONLY what is visually observable in the submitted image.
+
+Do not assume that the citizen's description is true.
+Do not invent details that cannot be seen.
+Do not identify a person.
+Do not make claims about ownership, legal responsibility, or exact location.
+
+Your task is to identify the visible infrastructure or public issue.
+
+Allowed categories:
+${CATEGORIES.join(", ")}
+
+Return ONLY valid JSON using exactly this structure:
+
+{
+  "detectedIssue": "short description of the issue visibly detected in the image",
+  "suggestedCategory": "one category from the allowed categories",
+  "confidence": 0,
+  "observations": [
+    "visible observation 1",
+    "visible observation 2"
+  ]
+}
+
+Rules:
+
+1. detectedIssue must describe the actual visible issue.
+2. suggestedCategory must be exactly one of the allowed categories.
+3. confidence must be a number from 0 to 100.
+4. observations must contain only visible evidence.
+5. If the image is unclear, use a lower confidence.
+6. If no relevant public infrastructure issue can be identified, use:
+   detectedIssue: "No clear infrastructure issue detected"
+   suggestedCategory: "Other"
+7. Never fabricate information.
+`;
+
+
+  const text =
+    await generateGeminiResponse(
+      imageUrl,
+      prompt
+    );
+
+
+  const result =
+    parseGeminiJson(
+      text
+    );
+
+
+  return {
+    detectedIssue:
+      String(
+        result.detectedIssue ||
+          ""
+      ).trim(),
+
+    suggestedCategory:
+      normalizeCategory(
+        result.suggestedCategory
+      ),
+
+    confidence:
+      normalizeConfidence(
+        result.confidence
+      ),
+
+    observations:
+      normalizeObservations(
+        result.observations
+      ),
+  };
+}
+
+
+// ============================================================
+// FULL COMPLAINT CONSISTENCY CHECK
+// ============================================================
+
+async function analyzeFullComplaint(
   imageUrl,
   category,
-  description,
-  mode,
-}) {
+  description
+) {
+  const prompt = `
+You are an AI evidence consistency checker for CivicAI.
+
+A citizen has submitted:
+
+Reported category:
+${category || "Not provided"}
+
+Reported description:
+${description || "Not provided"}
+
+Analyze the attached image and compare the visible evidence with the citizen's report.
+
+Important:
+- The AI must NOT claim that the complaint is definitely true or false.
+- The image can only provide visual evidence.
+- Do not identify people.
+- Do not infer hidden circumstances.
+- Do not invent facts.
+- Evaluate whether the visible evidence is reasonably consistent with the reported category and description.
+
+Allowed categories:
+${CATEGORIES.join(", ")}
+
+Return ONLY valid JSON using exactly this structure:
+
+{
+  "detectedIssue": "short description of the issue visibly detected",
+  "categoryMatch": true,
+  "descriptionMatch": true,
+  "score": 0,
+  "approved": true,
+  "reason": "short explanation of why the image is or is not visually consistent with the report"
+}
+
+Rules:
+
+1. detectedIssue must come from visible evidence.
+2. categoryMatch must indicate whether the visible issue appears consistent with the reported category.
+3. descriptionMatch must indicate whether the visible image is reasonably consistent with the description.
+4. score must be from 0 to 100.
+5. approved should be true when the evidence is reasonably consistent with the report.
+6. approved should be false when the image clearly conflicts with the report.
+7. If the image is unclear, lower the score and explain the uncertainty.
+8. Do not treat AI analysis as proof of the complaint.
+`;
+
+
+  const text =
+    await generateGeminiResponse(
+      imageUrl,
+      prompt
+    );
+
+
+  const result =
+    parseGeminiJson(
+      text
+    );
+
+
+  const score =
+    normalizeScore(
+      result.score
+    );
+
+
+  return {
+    detectedIssue:
+      String(
+        result.detectedIssue ||
+          ""
+      ).trim(),
+
+    categoryMatch:
+      Boolean(
+        result.categoryMatch
+      ),
+
+    descriptionMatch:
+      Boolean(
+        result.descriptionMatch
+      ),
+
+    score,
+
+    approved:
+      Boolean(
+        result.approved
+      ),
+
+    reason:
+      String(
+        result.reason ||
+          ""
+      ).trim(),
+  };
+}
+
+
+// ============================================================
+// MAIN ANALYSIS FUNCTION
+// ============================================================
+
+export async function analyzeComplaint(
+  {
+    imageUrl,
+    category = "",
+    description = "",
+    mode = "full-check",
+  } = {}
+) {
   if (!imageUrl) {
     throw new Error(
       "Image URL is required for AI analysis."
     );
   }
 
-  const imageResponse = await fetch(imageUrl);
 
-  if (!imageResponse.ok) {
-    throw new Error(
-      "Unable to retrieve evidence image."
+  if (
+    mode ===
+    "image-only"
+  ) {
+    return await analyzeImageOnly(
+      imageUrl
     );
   }
 
-  const imageBuffer =
-    await imageResponse.arrayBuffer();
 
-  const base64Image =
-    Buffer.from(imageBuffer).toString("base64");
-
-  const mimeType =
-    imageResponse.headers.get("content-type") ||
-    "image/jpeg";
-
-  let prompt;
-
-  /*
-   * --------------------------------------------------
-   * IMAGE-ONLY ANALYSIS
-   * --------------------------------------------------
-   */
-
-  if (mode === "image-only") {
-    prompt = `
-You are an AI visual evidence analyzer for a citizen infrastructure reporting platform.
-
-Analyze the uploaded image carefully.
-
-Your task is to identify whether a visible public infrastructure issue exists.
-
-You MUST select exactly ONE category from this list:
-
-- Road Damage
-- Garbage
-- Footpath
-- Streetlight
-- Water
-- Drainage
-- Public Transport
-- Other
-
-Important category rules:
-
-- Potholes, damaged roads, broken asphalt, road cracks,
-  craters or severe road degradation -> Road Damage
-- Broken sidewalks, damaged pedestrian paths or footpaths
-  -> Footpath
-- Garbage, waste, litter or trash -> Garbage
-- Broken/non-working street lamps -> Streetlight
-- Water shortage, leakage or visible water infrastructure
-  problems -> Water
-- Drain/sewer problems -> Drainage
-- Bus/public transport infrastructure problems -> Public Transport
-- If the issue cannot reasonably be classified -> Other
-
-Do not use alternative category names such as:
-"Roads & Footpaths"
-"Road & Footpath"
-"Transportation"
-"Waste Management"
-
-Use ONLY the exact category names listed above.
-
-Do not claim absolute certainty.
-
-Return ONLY valid JSON:
-
-{
-  "detectedIssue": "string",
-  "suggestedCategory": "Road Damage",
-  "confidence": 0,
-  "observations": [
-    "string"
-  ]
+  return await analyzeFullComplaint(
+    imageUrl,
+    category,
+    description
+  );
 }
 
-confidence must be a number from 0 to 100.
-`;
 
-  } else {
+// ============================================================
+// EXPORT CATEGORIES
+// ============================================================
 
-    /*
-     * --------------------------------------------------
-     * FULL COMPLAINT CONSISTENCY CHECK
-     * --------------------------------------------------
-     */
-
-    prompt = `
-You are an AI evidence consistency analyzer for a citizen infrastructure reporting platform.
-
-Analyze the uploaded image and compare it with the citizen's submitted information.
-
-Citizen category:
-${category}
-
-Citizen description:
-${description}
-
-The application uses ONLY these categories:
-
-- Road Damage
-- Garbage
-- Footpath
-- Streetlight
-- Water
-- Drainage
-- Public Transport
-- Other
-
-Determine whether the visible evidence appears reasonably consistent with the citizen's category and description.
-
-IMPORTANT:
-
-- Do not claim that the citizen is lying.
-- Do not claim absolute certainty.
-- Only use information actually visible in the image.
-- Do not invent details.
-- If the image is unclear, use approved=false.
-- If the category clearly does not match the visible issue, use approved=false.
-- A reasonable category match does not mean the complaint is proven true.
-
-Category matching examples:
-
-Potholes / damaged asphalt:
-Road Damage
-
-Broken sidewalk / pedestrian path:
-Footpath
-
-Garbage / trash / litter:
-Garbage
-
-Broken street lamp:
-Streetlight
-
-Water-related visible infrastructure issue:
-Water
-
-Drain / sewage issue:
-Drainage
-
-Bus / public transport infrastructure:
-Public Transport
-
-Anything else:
-Other
-
-Return ONLY valid JSON:
-
-{
-  "detectedIssue": "string",
-  "categoryMatch": true,
-  "descriptionMatch": true,
-  "score": 0,
-  "approved": true,
-  "reason": "string"
-}
-
-Rules:
-
-1. score must be between 0 and 100.
-
-2. categoryMatch should be true when the visible issue
-   appears reasonably consistent with the selected category.
-
-3. descriptionMatch should be true when the description
-   is reasonably consistent with what can be observed.
-
-4. approved should only be true when the evidence appears
-   sufficiently consistent.
-
-5. If the image is unclear, approved=false.
-
-6. If the category is clearly inconsistent with the image,
-   approved=false.
-
-7. Do not invent things that cannot be observed.
-
-8. Do not treat the AI result as proof that the complaint
-   is factually true.
-`;
-  }
-
-  const response = await generateWithRetry({
-    model: MODEL,
-
-    contents: [
-      {
-        role: "user",
-
-        parts: [
-          {
-            inlineData: {
-              mimeType,
-              data: base64Image,
-            },
-          },
-
-          {
-            text: prompt,
-          },
-        ],
-      },
-    ],
-
-    config: {
-      responseMimeType: "application/json",
-    },
-  });
-
-  const text = response.text;
-
-  if (!text) {
-    throw new Error(
-      "AI returned an empty response."
-    );
-  }
-
-  try {
-    const result = JSON.parse(text);
-
-    /*
-     * Normalize AI category output.
-     * This protects the frontend even if Gemini
-     * returns something like "Roads & Footpaths".
-     */
-
-    if (result.suggestedCategory) {
-      result.suggestedCategory =
-        normalizeCategory(
-          result.suggestedCategory
-        );
-    }
-
-    /*
-     * Normalize detected issue if necessary.
-     */
-
-    if (result.categoryMatch !== undefined) {
-      result.categoryMatch =
-        Boolean(result.categoryMatch);
-    }
-
-    if (result.descriptionMatch !== undefined) {
-      result.descriptionMatch =
-        Boolean(result.descriptionMatch);
-    }
-
-    if (result.score !== undefined) {
-      result.score = Math.max(
-        0,
-        Math.min(100, Number(result.score))
-      );
-    }
-
-    return result;
-
-  } catch (error) {
-    console.error(
-      "AI JSON parsing error:",
-      error
-    );
-
-    throw new Error(
-      "AI returned an invalid response."
-    );
-  }
-}
+export {
+  CATEGORIES,
+};

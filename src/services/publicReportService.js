@@ -3,26 +3,31 @@ const API_URL =
   "http://localhost:5000";
 
 
-// ==========================================
-// GET PUBLIC COMPLAINTS
-// ==========================================
+// ============================================================
+// GET PUBLIC REPORTS
+// ============================================================
 
-export async function getPublicReports(filters = {}) {
+export async function getPublicReports(
+  filters = {}
+) {
+  const params =
+    new URLSearchParams();
 
-  const params = new URLSearchParams();
 
-
-  Object.entries(filters).forEach(
+  Object.entries(
+    filters
+  ).forEach(
     ([key, value]) => {
-
       if (
         value !== undefined &&
         value !== null &&
         value !== ""
       ) {
-        params.append(key, value);
+        params.append(
+          key,
+          value
+        );
       }
-
     }
   );
 
@@ -30,62 +35,85 @@ export async function getPublicReports(filters = {}) {
   const query =
     params.toString();
 
+
   const url =
     `${API_URL}/api/reports/public` +
-    (query ? `?${query}` : "");
+    (
+      query
+        ? `?${query}`
+        : ""
+    );
 
 
   const response =
     await fetch(url);
 
 
-  const data =
-    await response.json();
+  let data;
+
+  try {
+    data =
+      await response.json();
+  } catch {
+    throw new Error(
+      "The server returned an invalid response."
+    );
+  }
 
 
   if (!response.ok) {
-
     throw new Error(
       data.message ||
-      "Unable to load public complaints."
+        "Unable to load public complaints."
     );
-
   }
 
 
   return data;
-
 }
 
 
-// ==========================================
-// GET ONE PUBLIC COMPLAINT
-// ==========================================
+// ============================================================
+// GET ONE PUBLIC REPORT
+// ============================================================
 
 export async function getPublicReportById(
   reportId
 ) {
-
-  const response =
-    await fetch(
-      `${API_URL}/api/reports/public/${reportId}`
-    );
-
-
-  const data =
-    await response.json();
-
-
-  if (!response.ok) {
-
+  if (!reportId) {
     throw new Error(
-      data.message ||
-      "Unable to load complaint."
+      "Complaint ID is required."
     );
-
   }
 
 
-  return data.report;
+  const response =
+    await fetch(
+      `${API_URL}/api/reports/public/${encodeURIComponent(
+        reportId
+      )}`
+    );
 
+
+  let data;
+
+  try {
+    data =
+      await response.json();
+  } catch {
+    throw new Error(
+      "The server returned an invalid response."
+    );
+  }
+
+
+  if (!response.ok) {
+    throw new Error(
+      data.message ||
+        "Unable to load complaint."
+    );
+  }
+
+
+  return data;
 }

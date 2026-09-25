@@ -6,25 +6,29 @@ export async function requireAuth(
   next
 ) {
   try {
-    const authorization =
+    const authHeader =
       req.headers.authorization || "";
 
-    if (!authorization.startsWith("Bearer ")) {
+    if (
+      !authHeader.startsWith(
+        "Bearer "
+      )
+    ) {
       return res.status(401).json({
         success: false,
         message:
-          "Authentication required."
+          "Authentication required.",
       });
     }
 
     const idToken =
-      authorization.substring(7);
+      authHeader.substring(7);
 
     if (!idToken) {
       return res.status(401).json({
         success: false,
         message:
-          "Authentication token is missing."
+          "Authentication token is missing.",
       });
     }
 
@@ -45,7 +49,7 @@ export async function requireAuth(
     return res.status(401).json({
       success: false,
       message:
-        "Invalid or expired authentication token."
+        "Invalid or expired authentication token.",
     });
   }
 }

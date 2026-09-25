@@ -2,13 +2,13 @@ import dotenv from "dotenv";
 import {
   initializeApp,
   cert,
-  getApps
+  getApps,
 } from "firebase-admin/app";
 import {
-  getFirestore
+  getFirestore,
 } from "firebase-admin/firestore";
 import {
-  getAuth
+  getAuth,
 } from "firebase-admin/auth";
 
 dotenv.config();
@@ -42,8 +42,8 @@ const firebaseApp =
         credential: cert({
           projectId,
           clientEmail,
-          privateKey
-        })
+          privateKey,
+        }),
       });
 
 console.log(
