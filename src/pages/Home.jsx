@@ -25,7 +25,7 @@ function Home() {
               </h1>
 
               <p className="home-hero-description">
-                citizen-infrastructure-platform turns citizen complaints into
+                CivicAI turns citizen complaints into
                 location-based public intelligence.
                 Explore what people are reporting,
                 discover complaint hotspots, and

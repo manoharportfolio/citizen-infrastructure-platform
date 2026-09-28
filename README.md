@@ -1,9 +1,9 @@
 
-# citizen-infrastructure-platform  https://citizen-infrastructure-platform.onrender.com/
+# CivicAI  https://CivicAI.onrender.com/
 
 > Report. Verify. Prioritize. Act.
 
-citizen-infrastructure-platform is an AI-powered citizen infrastructure reporting platform that allows citizens to report public infrastructure problems, verify complaint evidence using AI, and explore complaints through a location-based map.
+CivicAI is an AI-powered citizen infrastructure reporting platform that allows citizens to report public infrastructure problems, verify complaint evidence using AI, and explore complaints through a location-based map.
 
 ---
 
@@ -31,7 +31,7 @@ The platform focuses on collecting citizen complaints and converting them into u
 
 ## 💡 Our Solution
 
-citizen-infrastructure-platform allows citizens to:
+CivicAI allows citizens to:
 
 - Report infrastructure problems.
 - Upload photographic evidence.
@@ -52,7 +52,7 @@ Login is required only when submitting a complaint.
 
 ## 🤖 AI Features
 
-citizen-infrastructure-platform uses **Google Gemini** to analyze complaint evidence.
+CivicAI uses **Google Gemini** to analyze complaint evidence.
 
 The AI checks:
 
@@ -98,7 +98,7 @@ The AI analysis is used as an **evidence-assistance system**, not as absolute pr
 ## 📁 Project Structure
 
 ```text
-citizen-infrastructure-platform/
+CivicAI/
 │
 ├── src/
 │   ├── components/
@@ -319,7 +319,7 @@ Public Website
 
 **Team Name:** Dravex Studios
 
-https://citizen-infrastructure-platform.onrender.com/
+https://CivicAI.onrender.com/
 
 ### **Team Members**
 
@@ -341,7 +341,7 @@ Built for:
 
 ## 📌 Project Status
 
-citizen-infrastructure-platform is a hackathon prototype demonstrating how AI, citizen-generated reports, location intelligence, and evidence analysis can be combined into a public infrastructure reporting platform.
+CivicAI is a hackathon prototype demonstrating how AI, citizen-generated reports, location intelligence, and evidence analysis can be combined into a public infrastructure reporting platform.
 
 ---
 

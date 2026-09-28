@@ -523,7 +523,7 @@ function CitizenLogin() {
                   </h2>
 
                   <p className="text-muted mb-0">
-                    Reset your citizen-infrastructure-platform account password
+                    Reset your CivicAI account password
                     using email verification.
                   </p>
                 </div>

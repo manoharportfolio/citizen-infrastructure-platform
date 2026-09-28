@@ -470,7 +470,7 @@ function CitizenRegister() {
 
                 <p className="text-muted mb-4">
                   Your email has been verified and
-                  your citizen-infrastructure-platform account has been created.
+                  your CivicAI account has been created.
                 </p>
 
                 <button
@@ -512,7 +512,7 @@ function CitizenRegister() {
                 </h2>
 
                 <p className="text-muted mb-0">
-                  Create your citizen-infrastructure-platform citizen account.
+                  Create your CivicAI citizen account.
                 </p>
 
               </div>

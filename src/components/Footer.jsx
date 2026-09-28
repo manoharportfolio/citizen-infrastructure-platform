@@ -101,7 +101,7 @@ function Footer() {
           {/* ABOUT */}
           <div className="col-lg-3">
             <h6 className="fw-bold mb-3">
-              citizen-infrastructure-platform
+              CivicAI
             </h6>
 
             <p className="text-secondary small mb-0">
@@ -119,7 +119,7 @@ function Footer() {
         <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
 
           <small className="text-secondary">
-            © {new Date().getFullYear()} citizen-infrastructure-platform By Dravex Studios Team.
+            © {new Date().getFullYear()} CivicAI By Dravex Studios Team.
             All rights reserved.
           </small>
 
