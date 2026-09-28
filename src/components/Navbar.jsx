@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+// src/components/Navbar.jsx
+
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import {
   Link,
   useLocation,
@@ -15,80 +22,119 @@ import {
   getDoc,
 } from "firebase/firestore";
 
-import { auth, db } from "../firebase/config";
+import {
+  auth,
+  db,
+} from "../firebase/config";
+
 
 function Navbar() {
-  const navigate = useNavigate();
-  const location = useLocation();
+  const navigate =
+    useNavigate();
 
-  const navbarRef = useRef(null);
+  const location =
+    useLocation();
 
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const navbarRef =
+    useRef(null);
 
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [
+    user,
+    setUser,
+  ] = useState(null);
 
-  // ==========================================
+  const [
+    profile,
+    setProfile,
+  ] = useState(null);
+
+  const [
+    menuOpen,
+    setMenuOpen,
+  ] = useState(false);
+
+  const [
+    profileOpen,
+    setProfileOpen,
+  ] = useState(false);
+
+
+  // ==========================================================
   // AUTH
-  // ==========================================
+  // ==========================================================
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      async (currentUser) => {
-        setUser(currentUser);
-
-        if (!currentUser) {
-          setProfile(null);
-          return;
-        }
-
-        try {
-          const profileRef = doc(
-            db,
-            "users",
-            currentUser.uid
+    const unsubscribe =
+      onAuthStateChanged(
+        auth,
+        async (currentUser) => {
+          setUser(
+            currentUser
           );
 
-          const snapshot = await getDoc(
-            profileRef
-          );
+          if (!currentUser) {
+            setProfile(null);
+            return;
+          }
 
-          if (snapshot.exists()) {
-            setProfile(snapshot.data());
-          } else {
+          try {
+            const profileRef =
+              doc(
+                db,
+                "users",
+                currentUser.uid
+              );
+
+            const snapshot =
+              await getDoc(
+                profileRef
+              );
+
+            if (
+              snapshot.exists()
+            ) {
+              setProfile(
+                snapshot.data()
+              );
+            } else {
+              setProfile(null);
+            }
+          } catch (error) {
+            console.error(
+              "Unable to load profile:",
+              error
+            );
+
             setProfile(null);
           }
-        } catch (error) {
-          console.error(
-            "Unable to load profile:",
-            error
-          );
-
-          setProfile(null);
         }
-      }
-    );
+      );
 
-    return () => unsubscribe();
+    return () =>
+      unsubscribe();
   }, []);
 
-  // ==========================================
+
+  // ==========================================================
   // CLOSE MENUS WHEN ROUTE CHANGES
-  // ==========================================
+  // ==========================================================
 
   useEffect(() => {
     setMenuOpen(false);
     setProfileOpen(false);
-  }, [location.pathname]);
+  }, [
+    location.pathname,
+  ]);
 
-  // ==========================================
+
+  // ==========================================================
   // CLICK OUTSIDE
-  // ==========================================
+  // ==========================================================
 
   useEffect(() => {
-    function handleOutsideClick(event) {
+    function handleOutsideClick(
+      event
+    ) {
       if (
         navbarRef.current &&
         !navbarRef.current.contains(
@@ -113,29 +159,39 @@ function Navbar() {
     };
   }, []);
 
-  // ==========================================
+
+  // ==========================================================
   // HAMBURGER
-  // ==========================================
+  // ==========================================================
 
   function toggleMenu() {
-    setMenuOpen((previous) => !previous);
+    setMenuOpen(
+      (previous) =>
+        !previous
+    );
   }
+
 
   function closeMenu() {
     setMenuOpen(false);
   }
 
-  // ==========================================
+
+  // ==========================================================
   // PROFILE
-  // ==========================================
+  // ==========================================================
 
   function toggleProfile() {
-    setProfileOpen((previous) => !previous);
+    setProfileOpen(
+      (previous) =>
+        !previous
+    );
   }
 
-  // ==========================================
+
+  // ==========================================================
   // LOGOUT
-  // ==========================================
+  // ==========================================================
 
   async function handleLogout() {
     try {
@@ -156,17 +212,24 @@ function Navbar() {
     }
   }
 
-  // ==========================================
+
+  // ==========================================================
   // PROFILE DATA
-  // ==========================================
+  // ==========================================================
 
   const profileName =
-    profile?.fullName || "Citizen";
+    profile?.fullName ||
+    "Citizen";
 
   const profileInitial =
     profileName
       .charAt(0)
       .toUpperCase();
+
+
+  // ==========================================================
+  // NAVBAR
+  // ==========================================================
 
   return (
     <nav
@@ -175,29 +238,40 @@ function Navbar() {
     >
       <div className="container">
 
-        {/* =====================================
-            LOGO
-        ===================================== */}
+        {/* ==================================================
+            CIVICAI LOGO + BRAND
+        ================================================== */}
 
         <Link
           to="/"
-          className="navbar-brand civic-navbar-brand"
-          onClick={closeMenu}
+          className="navbar-brand civic-navbar-brand d-flex align-items-center gap-2"
+          onClick={
+            closeMenu
+          }
         >
-          CivicAI
+          <img
+            src="/civicai-icon.png"
+            alt="CivicAI"
+            width="42"
+            height="42"
+            className="civic-navbar-logo"
+          />
+
+          <span>
+            CivicAI
+          </span>
         </Link>
 
-        {/* =====================================
+
+        {/* ==================================================
             RIGHT SIDE
-            PROFILE + HAMBURGER
-        ===================================== */}
+        ================================================== */}
 
         <div className="d-flex align-items-center">
 
-          {/* ===================================
+          {/* =================================================
               PROFILE
-              OUTSIDE HAMBURGER
-          =================================== */}
+          ================================================= */}
 
           {user && (
             <div className="profile-wrapper">
@@ -205,18 +279,23 @@ function Navbar() {
               <button
                 type="button"
                 className="profile-button"
-                onClick={toggleProfile}
+                onClick={
+                  toggleProfile
+                }
                 aria-label="Open profile"
-                aria-expanded={profileOpen}
+                aria-expanded={
+                  profileOpen
+                }
               >
                 <span className="profile-avatar">
-                  {profileInitial}
+                  {
+                    profileInitial
+                  }
                 </span>
               </button>
 
-              {/* =================================
-                  FLOATING PROFILE POPUP
-              ================================= */}
+
+              {/* PROFILE POPUP */}
 
               {profileOpen && (
                 <div className="profile-popup">
@@ -224,89 +303,132 @@ function Navbar() {
                   <div className="profile-popup-header">
 
                     <div className="profile-popup-name">
-                      {profileName}
+                      {
+                        profileName
+                      }
                     </div>
 
                     <div className="profile-popup-email">
-                      {profile?.email ||
+                      {
+                        profile?.email ||
                         user.email ||
-                        ""}
+                        ""
+                      }
                     </div>
 
                   </div>
+
 
                   <button
                     type="button"
                     className="profile-popup-item"
                     onClick={() => {
-                      setProfileOpen(false);
-                      setMenuOpen(false);
+                      setProfileOpen(
+                        false
+                      );
+
+                      setMenuOpen(
+                        false
+                      );
 
                       navigate(
                         "/citizen/profile"
                       );
                     }}
                   >
-                    <span>👤</span>
-                    <span>Edit Profile</span>
+                    <span>
+                      👤
+                    </span>
+
+                    <span>
+                      Edit Profile
+                    </span>
                   </button>
+
 
                   <button
                     type="button"
                     className="profile-popup-item"
                     onClick={() => {
-                      setProfileOpen(false);
-                      setMenuOpen(false);
+                      setProfileOpen(
+                        false
+                      );
+
+                      setMenuOpen(
+                        false
+                      );
 
                       navigate(
                         "/citizen/my-reports"
                       );
                     }}
                   >
-                    <span>📋</span>
-                    <span>My Reports</span>
+                    <span>
+                      📋
+                    </span>
+
+                    <span>
+                      My Reports
+                    </span>
                   </button>
 
+
                   <div className="profile-popup-divider"></div>
+
 
                   <button
                     type="button"
                     className="profile-popup-item logout-item"
-                    onClick={handleLogout}
+                    onClick={
+                      handleLogout
+                    }
                   >
-                    <span>↪</span>
-                    <span>Logout</span>
+                    <span>
+                      ↪
+                    </span>
+
+                    <span>
+                      Logout
+                    </span>
                   </button>
 
                 </div>
               )}
+
             </div>
           )}
 
-          {/* ===================================
+
+          {/* =================================================
               HAMBURGER
-          =================================== */}
+          ================================================= */}
 
           <button
             type="button"
             className="navbar-toggler ms-2"
             aria-label="Toggle navigation"
-            aria-expanded={menuOpen}
-            onClick={toggleMenu}
+            aria-expanded={
+              menuOpen
+            }
+            onClick={
+              toggleMenu
+            }
           >
             <span className="navbar-toggler-icon"></span>
           </button>
 
         </div>
 
-        {/* =====================================
-            HAMBURGER MENU
-            PROFILE IS NOT INSIDE THIS
-        ===================================== */}
+
+        {/* ==================================================
+            NAVIGATION MENU
+        ================================================== */}
 
         <div
           className={`collapse navbar-collapse ${
-            menuOpen ? "show" : ""
+            menuOpen
+              ? "show"
+              : ""
           }`}
         >
           <ul className="navbar-nav ms-auto align-items-lg-center">
@@ -317,15 +439,19 @@ function Navbar() {
               <Link
                 to="/"
                 className={`nav-link ${
-                  location.pathname === "/"
+                  location.pathname ===
+                  "/"
                     ? "active"
                     : ""
                 }`}
-                onClick={closeMenu}
+                onClick={
+                  closeMenu
+                }
               >
                 Home
               </Link>
             </li>
+
 
             {/* EXPLORE */}
 
@@ -338,11 +464,14 @@ function Navbar() {
                     ? "active"
                     : ""
                 }`}
-                onClick={closeMenu}
+                onClick={
+                  closeMenu
+                }
               >
                 Explore Complaints
               </Link>
             </li>
+
 
             {/* REPORT */}
 
@@ -360,13 +489,16 @@ function Navbar() {
                     ? "active"
                     : ""
                 }`}
-                onClick={closeMenu}
+                onClick={
+                  closeMenu
+                }
               >
                 Report an Issue
               </Link>
             </li>
 
-            {/* LOGGED IN LINKS */}
+
+            {/* LOGGED-IN LINKS */}
 
             {user && (
               <>
@@ -374,23 +506,29 @@ function Navbar() {
                   <Link
                     to="/citizen/dashboard"
                     className="nav-link"
-                    onClick={closeMenu}
+                    onClick={
+                      closeMenu
+                    }
                   >
                     Dashboard
                   </Link>
                 </li>
 
+
                 <li className="nav-item">
                   <Link
                     to="/citizen/my-reports"
                     className="nav-link"
-                    onClick={closeMenu}
+                    onClick={
+                      closeMenu
+                    }
                   >
                     My Reports
                   </Link>
                 </li>
               </>
             )}
+
 
             {/* LOGIN */}
 
@@ -399,7 +537,9 @@ function Navbar() {
                 <Link
                   to="/citizen/login"
                   className="btn btn-primary ms-lg-2 mt-2 mt-lg-0"
-                  onClick={closeMenu}
+                  onClick={
+                    closeMenu
+                  }
                 >
                   Login
                 </Link>

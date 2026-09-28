@@ -1,0 +1,18 @@
+{
+  "name": "CivicAI",
+  "short_name": "CivicAI",
+  "description": "AI-powered citizen infrastructure reporting platform.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/civicai-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
